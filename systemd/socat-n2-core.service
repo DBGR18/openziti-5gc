@@ -1,0 +1,25 @@
+[Unit]
+Description=TCP-to-SCTP converter for N2 NGAP (Core side)
+Documentation=https://openziti.io/docs
+After=ziti-tunnel-core.service
+Requires=ziti-tunnel-core.service
+
+[Service]
+Type=simple
+# Fabric 解密後送到 localhost:38413(TCP) → socat 轉成 SCTP → AMF:38412
+#
+# 流量路徑：
+#   Fabric ──→ Tunneler ──(TCP)──→ socat:38413 ──(SCTP)──→ AMF 127.0.0.18:38412
+#
+ExecStart=/usr/bin/socat \
+    TCP-LISTEN:38413,fork,reuseaddr \
+    SCTP:127.0.0.18:38412
+Restart=always
+RestartSec=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=socat-n2-core
+
+[Install]
+WantedBy=multi-user.target

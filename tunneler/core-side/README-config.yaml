@@ -1,0 +1,51 @@
+# =============================================================================
+# 核網側 ziti-edge-tunnel 設定
+# 部署在 AMF / UPF 所在的主機上
+#
+# 職責：
+#   1. 提供（host/Bind）N2 和 N3 服務
+#   2. 從 Ziti Fabric 接收加密流量，解密後轉發給本機的 AMF/UPF
+#
+# 啟動方式（二選一）：
+#   手動: sudo ziti-edge-tunnel run-host -i /path/to/core-amf-host.json
+#   systemd: sudo systemctl start ziti-tunnel-core
+# =============================================================================
+
+# =============================================================================
+# 啟動命令（host-only 模式）：
+# =============================================================================
+#
+# sudo ./bin/ziti-edge-tunnel run-host \
+#   --identity /home/dbgr/openziti-5gc/pki/identities/core-amf-host.json \
+#   --verbose 3
+#
+# 注意：核網側用 run-host 而不是 run
+# run-host = 只做 host（提供服務），不做 intercept（不攔截本機流量）
+# 這樣核網主機上的 AMF/UPF 正常對外通訊不受影響
+#
+# =============================================================================
+# host 模式下 Tunneler 會：
+# =============================================================================
+#
+# 1. 連接到 Ziti Controller，取得該 Identity 可 Bind 的 Service 列表
+# 2. 對每個 Service，向 Fabric 註冊 Terminator
+# 3. 當 Fabric 把流量路由過來時：
+#    - N2: 解密 → 送到 localhost:38413 → socat 轉 SCTP → AMF:38412
+#    - N3: 解密 → 送到 127.0.0.8:2152 (UDP) → UPF
+#    - N4: 解密 → 送到 127.0.0.8:8805 (UDP) → UPF
+#
+# =============================================================================
+# 如果 AMF 和 UPF 在不同主機：
+# =============================================================================
+#
+# 機器 C1（AMF）:
+#   sudo ziti-edge-tunnel run-host \
+#     --identity /path/core-amf-host.json
+#   # 此 Identity 只 Bind n2-ngap-service
+#
+# 機器 C2（UPF）:
+#   sudo ziti-edge-tunnel run-host \
+#     --identity /path/core-upf-host.json
+#   # 此 Identity 只 Bind n3-gtpu-service 和 n4-pfcp-service
+#
+# 不需要改 services.yml，策略會自動匹配

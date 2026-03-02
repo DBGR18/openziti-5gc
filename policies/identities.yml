@@ -1,0 +1,69 @@
+# =============================================================================
+# Ziti Identities 定義
+# 每個 gNB 與核網組件各一個 Identity
+#
+# 修改此檔後執行: make apply-identities
+# =============================================================================
+
+identities:
+
+  # ===================================================================
+  # gNB 側（RAN 端）
+  # 每台 gNB 主機上的 Tunneler 需要一個獨立 Identity
+  # ===================================================================
+
+  - name: gnb-01
+    type: Device
+    roleAttributes:
+      - gnb-side           # 用於 Service Policy 匹配
+      - region-north       # 可選：依地區分類
+    enrollment:
+      ott: true            # One-Time-Token 自動 enroll
+
+  # 需要更多 gNB 時複製並修改：
+  # - name: gnb-02
+  #   type: Device
+  #   roleAttributes:
+  #     - gnb-side
+  #     - region-north
+  #   enrollment:
+  #     ott: true
+
+  # - name: gnb-kaohsiung-01
+  #   type: Device
+  #   roleAttributes:
+  #     - gnb-side
+  #     - region-south
+  #   enrollment:
+  #     ott: true
+
+  # ===================================================================
+  # 核網側（Core Network 端）
+  # AMF 和 UPF 所在主機的 Tunneler 身份
+  # ===================================================================
+
+  - name: core-amf-host
+    type: Device
+    roleAttributes:
+      - core-side
+      - control-plane-host  # 可提供 N2 服務
+    enrollment:
+      ott: true
+
+  - name: core-upf-host
+    type: Device
+    roleAttributes:
+      - core-side
+      - user-plane-host     # 可提供 N3/N4 服務
+    enrollment:
+      ott: true
+
+  # 如果 AMF 和 UPF 在同一台主機，可以合併成一個 Identity：
+  # - name: core-all-in-one
+  #   type: Device
+  #   roleAttributes:
+  #     - core-side
+  #     - control-plane-host
+  #     - user-plane-host
+  #   enrollment:
+  #     ott: true

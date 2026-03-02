@@ -1,0 +1,61 @@
+# =============================================================================
+# OpenZiti Edge Router 設定檔
+# 三 Namespace 部署版本：Router 運行在 router-ns 內
+#
+# router-ns IP：
+#   10.10.1.1 (gnb-ns 側)   10.10.2.1 (core-ns 側)   10.10.3.1 (Host 側)
+# =============================================================================
+v: 3
+
+identity:
+  cert:        pki/ca/certs/router-client.cert
+  key:         pki/ca/keys/router-client.key
+  ca:          pki/ca/cas/ca.cert
+  server_cert: pki/ca/certs/router-server.chain.pem
+  server_key:  pki/ca/keys/router-server.key
+
+ctrl:
+  # Controller 在同一個 router-ns，用 localhost 即可
+  endpoint: tls:127.0.0.1:6262
+  heartbeatIntervalSeconds: 10
+
+link:
+  dialers:
+    - binding: transport
+
+# Router 只做 Fabric 路由，不做 tunnel intercept/host
+listeners:
+  - binding: edge
+    address: tls:0.0.0.0:3022
+    options:
+      # gnb-ns 透過 10.10.1.1 連入，core-ns 透過 10.10.2.1 連入
+      advertise: 10.10.1.1:3022
+      maxConnections: 32768
+
+edge:
+  csr:
+    country: TW
+    province: Taiwan
+    locality: Taipei
+    organization: MyTelco
+    organizationalUnit: 5GCore
+    sans:
+      dns:
+        - localhost
+        - ziti-router
+      ip:
+        - "127.0.0.1"
+        - "10.10.1.1"
+        - "10.10.2.1"
+        - "10.10.3.1"
+
+forwarder:
+  latencyProbeInterval: 10
+  xgressDialWorkerCount: 128
+  xgressDialQueueLength: 10000
+
+healthChecks:
+  ctrlPingCheck:
+    interval: 30s
+    timeout: 15s
+    initialDelay: 15s

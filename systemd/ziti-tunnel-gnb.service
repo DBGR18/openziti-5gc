@@ -1,0 +1,30 @@
+[Unit]
+Description=OpenZiti Edge Tunnel - gNB Side (Intercept/Dial)
+Documentation=https://openziti.io/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# run = 同時做 intercept + host（gNB 側需要 intercept 攔截出站流量）
+ExecStart=/home/dbgr/openziti-5gc/bin/ziti-edge-tunnel run \
+    --identity-dir /home/dbgr/openziti-5gc/pki/identities \
+    --dns-ip-range 100.64.0.0/10 \
+    --verbose 2
+
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+# Tunneler 需要建立 tun 介面和設定 iptables/tproxy 規則
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ziti-tunnel-gnb
+
+[Install]
+WantedBy=multi-user.target

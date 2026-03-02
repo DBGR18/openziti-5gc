@@ -1,0 +1,9 @@
+# OpenZiti 建置檔案
+data/
+logs/
+bin/
+pki/ca/
+pki/identities/*.json
+.admin-password
+*.pid
+/tmp/

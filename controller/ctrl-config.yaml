@@ -1,0 +1,63 @@
+# =============================================================================
+# OpenZiti Controller 設定檔
+# 三 Namespace 部署版本：Controller 運行在 router-ns 內
+#
+# router-ns IP：
+#   10.10.1.1 (gnb-ns 側)   10.10.2.1 (core-ns 側)   10.10.3.1 (Host 側)
+# =============================================================================
+v: 3
+
+db: data/ctrl.db
+
+identity:
+  cert:        pki/ca/certs/ctrl-client.cert
+  key:         pki/ca/keys/ctrl-client.key
+  ca:          pki/ca/cas/ca.cert
+  server_cert: pki/ca/certs/ctrl-server.chain.pem
+  server_key:  pki/ca/keys/ctrl-server.key
+
+# 控制平面監聽（Router 連入用）
+ctrl:
+  listener: tls:0.0.0.0:6262
+  options:
+    # Router 在同一 namespace，用 localhost 即可
+    # gnb-ns/core-ns 的 Tunneler 也需透過 10.10.x.1 連入
+    advertiseAddress: tls:10.10.3.1:6262
+    connectTimeout: 15s
+    writeTimeout: 15s
+
+# Edge 管理 API
+edge:
+  enrollment:
+    signingCert:
+      cert: pki/ca/certs/ctrl-intermediate.cert
+      key:  pki/ca/keys/ctrl-intermediate.key
+    edgeIdentity:
+      duration: 180m
+    edgeRouter:
+      duration: 180m
+  api:
+    listener: 0.0.0.0:1280
+    # Host 透過 10.10.3.1 管理，gnb-ns 用 10.10.1.1，core-ns 用 10.10.2.1
+    advertise: 10.10.3.1:1280
+    sessionTimeout: 30m
+    activityTimeout: 10m
+
+web:
+  - name: client-management
+    bindPoints:
+      - interface: 0.0.0.0:1280
+        address: 10.10.3.1:1280
+    apis:
+      - binding: edge-management
+        options: {}
+      - binding: edge-client
+        options: {}
+      - binding: fabric
+        options: {}
+
+healthChecks:
+  boltCheck:
+    interval: 30s
+    timeout: 20s
+    initialDelay: 30s

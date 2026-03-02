@@ -1,0 +1,105 @@
+# =============================================================================
+# Ziti Services 定義
+# 對應 free5gc 的 N2 / N3 / N4 介面
+#
+# 修改此檔後執行: make apply-services
+# =============================================================================
+
+services:
+
+  # -------------------------------------------------------------------
+  # N2 控制面：gNB ↔ AMF（SCTP/NGAP, Port 38412）
+  # 方案 2：SCTP-over-TCP 封裝
+  #
+  #   gNB 側: gNB(SCTP:38412) → socat(SCTP→TCP) → Tunneler intercept
+  #   核網側: Tunneler host → socat(TCP→SCTP) → AMF(SCTP:38412)
+  #
+  # Ziti 傳輸的是 TCP，兩端的 socat 負責 SCTP↔TCP 轉換
+  # -------------------------------------------------------------------
+  - name: n2-ngap-service
+    roleAttributes:
+      - core-services
+      - control-plane
+    configs:
+      intercept:
+        protocols:
+          - tcp                # gNB 側 socat 轉出的是 TCP
+        addresses:
+          - amf.ziti           # gNB 側 socat 連這個虛擬地址
+        portRanges:
+          - low: 38412
+            high: 38412
+      host:
+        protocol: tcp
+        address: 127.0.0.1     # 核網側 socat 監聽在 localhost
+        port: 38413            # socat TCP:38413 → SCTP:127.0.0.18:38412
+
+  # -------------------------------------------------------------------
+  # N3 用戶面：gNB ↔ UPF（GTP-U, UDP Port 2152）
+  # UPF 在 core-ns (10.10.2.2)，upfcfg.yaml 中 gtpu.addr 設為 10.10.2.2
+  # SMF 會告訴 gNB: UPF 在 10.10.2.2:2152
+  # gnb-ns 的 tproxy 會放截此封包 → Ziti → core-ns Tunneler → UPF
+  # -------------------------------------------------------------------
+  - name: n3-gtpu-service
+    roleAttributes:
+      - core-services
+      - user-plane
+    configs:
+      intercept:
+        protocols:
+          - udp
+        addresses:
+          - "10.10.2.2"        # UPF 在 core-ns 的 veth IP
+        portRanges:
+          - low: 2152
+            high: 2152
+      host:
+        protocol: udp
+        address: 10.10.2.2     # core-ns 內的 UPF address
+        port: 2152
+
+  # -------------------------------------------------------------------
+  # N4 控制面（可選）：SMF ↔ UPF（PFCP, UDP Port 8805）
+  # 對應 smfcfg.yaml 的 pfcp.nodeID: 127.0.0.1 → UPF pfcp.addr: 127.0.0.8
+  # -------------------------------------------------------------------
+  # -------------------------------------------------------------------
+  # N4 控制面（可選）：SMF ↔ UPF（PFCP, UDP Port 8805）
+  # 在三 ns 模型中，SMF 和 UPF 都在 core-ns，N4 不跨 namespace
+  # 此服務僅在 SMF/UPF 分離部署時才需要
+  # -------------------------------------------------------------------
+  - name: n4-pfcp-service
+    roleAttributes:
+      - core-services
+      - pfcp-plane
+    configs:
+      intercept:
+        protocols:
+          - udp
+        addresses:
+          - "10.10.2.2"        # 與 N3 相同，UPF 在 core-ns
+        portRanges:
+          - low: 8805
+            high: 8805
+      host:
+        protocol: udp
+        address: 127.0.0.8     # core-ns 內 UPF PFCP 監聽地址
+        port: 8805
+
+  # -------------------------------------------------------------------
+  # SBI 服務匯流排（可選）：NF 之間的 HTTP/2 SBI 通訊
+  # 保護 NRF, AMF, SMF 等之間的 SBI
+  # -------------------------------------------------------------------
+  # - name: sbi-nrf-service
+  #   roleAttributes:
+  #     - sbi-services
+  #   configs:
+  #     intercept:
+  #       protocols: [tcp]
+  #       addresses: [nrf.ziti]
+  #       portRanges:
+  #         - low: 8000
+  #           high: 8000
+  #     host:
+  #       protocol: tcp
+  #       address: 127.0.0.10
+  #       port: 8000

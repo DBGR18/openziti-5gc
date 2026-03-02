@@ -1,0 +1,62 @@
+# =============================================================================
+# Ziti Service Policies — 存取控制策略
+# 定義「誰可以呼叫（Dial）或提供（Bind）哪些服務」
+#
+# 修改此檔後執行: make apply-policies
+# =============================================================================
+
+servicePolicies:
+
+  # -------------------------------------------------------------------
+  # Dial 策略：gNB 可以「呼叫」哪些核網服務
+  # -------------------------------------------------------------------
+
+  # 所有 gNB 可存取 N2（AMF）和 N3（UPF）
+  - name: gnb-dial-n2-n3
+    type: Dial
+    identityRoles:
+      - "#gnb-side"            # 符合「gnb-side」角色的所有 Identity
+    serviceRoles:
+      - "#control-plane"       # N2 NGAP
+      - "#user-plane"          # N3 GTP-U
+
+  # -------------------------------------------------------------------
+  # Bind 策略：核網主機可以「提供」哪些服務
+  # -------------------------------------------------------------------
+
+  # AMF 主機提供 N2 服務
+  - name: core-bind-n2
+    type: Bind
+    identityRoles:
+      - "#control-plane-host"
+    serviceRoles:
+      - "#control-plane"
+
+  # UPF 主機提供 N3 和 N4 服務
+  - name: core-bind-n3-n4
+    type: Bind
+    identityRoles:
+      - "#user-plane-host"
+    serviceRoles:
+      - "#user-plane"
+      - "#pfcp-plane"
+
+  # -------------------------------------------------------------------
+  # 進階策略範例（取消註解啟用）
+  # -------------------------------------------------------------------
+
+  # 限制：只有北部 gNB 能連北部核網
+  # - name: north-region-only
+  #   type: Dial
+  #   identityRoles:
+  #     - "#region-north"
+  #   serviceRoles:
+  #     - "#core-north"
+
+  # SMF 可存取 N4 PFCP
+  # - name: smf-dial-n4
+  #   type: Dial
+  #   identityRoles:
+  #     - "#smf-host"
+  #   serviceRoles:
+  #     - "#pfcp-plane"

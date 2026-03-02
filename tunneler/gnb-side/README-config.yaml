@@ -1,0 +1,74 @@
+# =============================================================================
+# gNB 側 ziti-edge-tunnel 設定
+# 部署在 gNB（UERANSIM）所在的主機上
+#
+# 職責：
+#   1. 攔截 gNB 發往 AMF/UPF 的流量（intercept / Dial 角色）
+#   2. 將攔截的流量加密後送入 Ziti Fabric
+#
+# 啟動方式（二選一）：
+#   手動: sudo ziti-edge-tunnel run -i /path/to/gnb-01.json
+#   systemd: sudo systemctl start ziti-tunnel-gnb
+# =============================================================================
+
+# Identity 檔案位置（enroll 後生成的 JSON）
+identity_dir: /home/dbgr/openziti-5gc/pki/identities
+
+# 注意：ziti-edge-tunnel 不使用 YAML 設定檔啟動
+# 它的所有設定都透過命令列參數傳入
+# 此檔案僅做為文件說明，實際啟動命令見下方或 systemd unit
+
+# =============================================================================
+# 啟動命令：
+# =============================================================================
+#
+# sudo ./bin/ziti-edge-tunnel run \
+#   --identity /home/dbgr/openziti-5gc/pki/identities/gnb-01.json \
+#   --dns-ip-range "100.64.0.0/10" \
+#   --verbose 3
+#
+# 參數說明：
+#   --identity     : 此 gNB 的 Identity 檔案（含憑證和 Controller 位址）
+#   --dns-ip-range : Ziti DNS 攔截用的 IP 範圍，amf.ziti 會被解析到此範圍內的 IP
+#   --verbose      : 日誌等級 (0=error, 3=debug)
+#
+# =============================================================================
+# tproxy 模式下 Tunneler 會自動：
+# =============================================================================
+#
+# 1. 建立 tun 介面（ziti0）
+# 2. 設定 iptables mangle 規則：
+#      iptables -t mangle -A PREROUTING -p tcp --dport 38412 -d 100.64.x.x -j TPROXY ...
+#      iptables -t mangle -A PREROUTING -p udp --dport 2152  -d 100.64.x.x -j TPROXY ...
+# 3. 設定 ip rule 和路由表：
+#      ip rule add fwmark 0x1/0x1 lookup 100
+#      ip route add local 0.0.0.0/0 dev lo table 100
+# 4. 啟動內建 DNS 解析器：
+#      amf.ziti → 100.64.0.1（虛擬 IP）
+#      upf.ziti → 100.64.0.2（虛擬 IP）
+#
+# =============================================================================
+# 流量路徑（N2 with socat）：
+# =============================================================================
+#
+# gNB ──(SCTP:38412)──→ socat ──(TCP:38412)──→ Tunneler 攔截
+#                                                    │
+#                                           ┌────────▼────────┐
+#                                           │ 查 Ziti Service  │
+#                                           │ amf.ziti:38412   │
+#                                           │ → n2-ngap-service│
+#                                           │ → 加密送入 Fabric │
+#                                           └─────────────────┘
+#
+# =============================================================================
+# 流量路徑（N3 直接攔截 UDP）：
+# =============================================================================
+#
+# gNB ──(UDP:2152 dst=upf.ziti)──→ Tunneler 的 tproxy 攔截
+#                                        │
+#                               ┌────────▼────────┐
+#                               │ 查 Ziti Service  │
+#                               │ upf.ziti:2152    │
+#                               │ → n3-gtpu-service│
+#                               │ → 加密送入 Fabric │
+#                               └─────────────────┘

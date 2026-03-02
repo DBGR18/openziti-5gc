@@ -1,0 +1,26 @@
+[Unit]
+Description=SCTP-to-TCP converter for N2 NGAP (gNB side)
+Documentation=https://openziti.io/docs
+# socat 要在 Tunneler 之後啟動，因為 amf.ziti 需要 Tunneler 的 DNS 先解析
+After=ziti-tunnel-gnb.service
+Requires=ziti-tunnel-gnb.service
+
+[Service]
+Type=simple
+# gNB 送出 SCTP:38412 → socat 轉成 TCP → 送到 amf.ziti:38412（被 Tunneler 攔截）
+#
+# 流量路徑：
+#   gNB ──(SCTP)──→ socat:38412 ──(TCP)──→ amf.ziti:38412 ──→ Tunneler ──→ Fabric
+#
+ExecStart=/usr/bin/socat \
+    SCTP-LISTEN:38412,fork,reuseaddr \
+    TCP:amf.ziti:38412
+Restart=always
+RestartSec=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=socat-n2-gnb
+
+[Install]
+WantedBy=multi-user.target

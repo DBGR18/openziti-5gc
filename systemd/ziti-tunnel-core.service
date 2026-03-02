@@ -1,0 +1,29 @@
+[Unit]
+Description=OpenZiti Edge Tunnel - Core Side (Host/Bind only)
+Documentation=https://openziti.io/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# run-host = 只做 host/Bind，不做 intercept
+# 核網側只需要「提供」服務，不需要攔截出站流量
+ExecStart=/home/dbgr/openziti-5gc/bin/ziti-edge-tunnel run-host \
+    --identity-dir /home/dbgr/openziti-5gc/pki/identities \
+    --verbose 2
+
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ziti-tunnel-core
+
+[Install]
+WantedBy=multi-user.target
