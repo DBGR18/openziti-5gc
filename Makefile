@@ -193,12 +193,11 @@ controller-init:
 # =============================================================================
 start-controller:
 	@echo ">>> 在 router-ns 內啟動 Controller..."
-	sudo ip netns exec router-ns \
-		nohup $(ZITI) controller run $(CTRL_CFG) \
-		> $(LOG_DIR)/controller.log 2>&1 &
+	sudo ip netns exec router-ns nohup $(ZITI) controller run $(CTRL_CFG) > $(LOG_DIR)/controller.log 2>&1 &
 	@echo $$! > $(DATA_DIR)/controller.pid
-	@sleep 3
-	@echo "✓ Controller 已啟動 (PID: $$(cat $(DATA_DIR)/controller.pid))"
+	@echo ">>> 等待 Controller 就緒..."
+	@timeout 15 bash -c 'until sudo ip netns exec router-ns nc -z $(CTRL_HOST) $(CTRL_MGMT_PORT); do sleep 1; done' || (echo "啟動超時" && exit 1)
+	@echo "✓ Controller 已啟動"
 
 stop-controller:
 	@if [ -f $(DATA_DIR)/controller.pid ]; then \
