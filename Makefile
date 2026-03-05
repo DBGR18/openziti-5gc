@@ -136,6 +136,9 @@ install-tunnel: dirs
 # =============================================================================
 pki:
 	@echo ">>> 生成 Root CA..."
+	@echo ">>> 預先建立所有憑證的目錄結構..."
+	mkdir -p $(PKI_DIR)/{ctrl-intermediate,ctrl-server,ctrl-client,router-server,router-client}/{keys,certs}
+	@echo ">>> 生成 Root CA..."
 	$(ZITI) pki create ca \
 		--pki-root $(PKI_DIR) \
 		--ca-file ca \
@@ -158,7 +161,7 @@ pki:
 		--pki-root $(PKI_DIR) \
 		--ca-name ca \
 		--client-file ctrl-client \
-		--key-file ctrl-client
+		--client-name "Controller Client"
 	@echo ">>> 生成 Router Server 憑證..."
 	$(ZITI) pki create server \
 		--pki-root $(PKI_DIR) \
@@ -171,8 +174,8 @@ pki:
 		--pki-root $(PKI_DIR) \
 		--ca-name ca \
 		--client-file router-client \
-		--key-file router-client
-	@echo "✓ PKI 憑證全部生成完成"
+		--client-name "Router Client"
+	@echo "✓ PKI 憑證生成完成（位於 $(PKI_DIR)）"
 
 # =============================================================================
 # 4. 初始化 Controller
