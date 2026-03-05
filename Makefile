@@ -92,7 +92,7 @@ dirs:
 download: dirs
 	@echo ">>> 下載 ziti v$(ZITI_VERSION) ..."
 	curl -sL "https://github.com/openziti/ziti/releases/download/v$(ZITI_VERSION)/ziti-linux-amd64-$(ZITI_VERSION).tar.gz" \
-		| tar xz -C $(BIN_DIR)/ --strip-components=1
+		| tar xz -C $(BIN_DIR)/
 	chmod +x $(BIN_DIR)/ziti
 	@echo ">>> 下載 ziti-edge-tunnel v$(TUNNEL_VERSION) ..."
 	curl -sL "https://github.com/openziti/ziti-tunnel-sdk-c/releases/download/v$(TUNNEL_VERSION)/ziti-edge-tunnel-Linux_x86_64.zip" \
