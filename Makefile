@@ -81,7 +81,7 @@ help:
 # 1. 建立目錄
 # =============================================================================
 dirs:
-	mkdir -p $(BIN_DIR) $(PKI_DIR)/{ca,controller,router,identities}
+	mkdir -p $(BIN_DIR) $(PKI_DIR)/identities
 	mkdir -p $(DATA_DIR) $(LOG_DIR)
 	mkdir -p $(POLICY_DIR) $(SCRIPTS_DIR)
 	@echo "✓ 目錄建立完成"
