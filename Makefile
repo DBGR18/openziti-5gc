@@ -306,12 +306,28 @@ enroll-core:
 
 start-tunnel-core:
 	@echo ">>> 在 core-ns 內啟動 Tunneler (run-host 模式)..."
+	@echo ">>> 準備 core-side identities ..."
+	@mkdir -p $(DATA_DIR)/core-identities
+	@cp -f $(PKI_DIR)/identities/core-*.json $(DATA_DIR)/core-identities/ 2>/dev/null || true
+	@echo ">>> 清理 core-ns 舊的 tunnel/socat ..."
+	-@if [ -f $(DATA_DIR)/tunnel-core.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/tunnel-core.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/tunnel-core.pid; \
+	fi
+	-@if [ -f $(DATA_DIR)/socat-core.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/socat-core.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/socat-core.pid; \
+	fi
+	-sudo ip netns exec core-ns pkill -f "socat TCP-LISTEN:38413" 2>/dev/null || true
+	-sudo ip netns exec core-ns ip link del ziti0 2>/dev/null || true
+	-sudo ip netns exec core-ns ip link del ziti1 2>/dev/null || true
+	@sleep 1
 	sudo ip netns exec core-ns \
 		nohup $(ZET) run-host \
-		--identity-dir $(PKI_DIR)/identities/ \
+		--identity-dir $(DATA_DIR)/core-identities/ \
 		--verbose 2 \
 		> $(LOG_DIR)/tunnel-core.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/tunnel-core.pid
+	@sudo ip netns exec core-ns pgrep -f "ziti-edge-tunnel run-host" | tail -n1 > $(DATA_DIR)/tunnel-core.pid || true
 	@sleep 2
 	@echo "✓ Core Tunneler 已在 core-ns 內啟動"
 	@echo ">>> 啟動 N2 socat (core-ns 內)..."
@@ -319,18 +335,34 @@ start-tunnel-core:
 		nohup socat TCP-LISTEN:38413,bind=127.0.0.1,fork,reuseaddr \
 		SCTP:127.0.0.18:38412 \
 		> $(LOG_DIR)/socat-n2-core.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/socat-core.pid
+	@sudo ip netns exec core-ns pgrep -f "socat TCP-LISTEN:38413" | tail -n1 > $(DATA_DIR)/socat-core.pid || true
 	@echo "✓ socat-core 已啟動 (TCP:38413→SCTP:AMF:38412)"
 
 start-tunnel-gnb:
 	@echo ">>> 在 gnb-ns 內啟動 Tunneler (run/tproxy 模式)..."
+	@echo ">>> 設定 gnb-ns DNS 指向 Ziti DNS (100.64.0.1)..."
+	-sudo mkdir -p /etc/netns/gnb-ns
+	-echo -e "nameserver 100.64.0.1\noptions timeout:1 attempts:1" | sudo tee /etc/netns/gnb-ns/resolv.conf >/dev/null
+	@echo ">>> 清理 gnb-ns 舊的 tunnel/socat ..."
+	-@if [ -f $(DATA_DIR)/tunnel-gnb.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/tunnel-gnb.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/tunnel-gnb.pid; \
+	fi
+	-@if [ -f $(DATA_DIR)/socat-gnb.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/socat-gnb.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/socat-gnb.pid; \
+	fi
+	-sudo ip netns exec gnb-ns pkill -f "socat SCTP-LISTEN:38412" 2>/dev/null || true
+	-sudo ip netns exec gnb-ns ip link del ziti0 2>/dev/null || true
+	-sudo ip netns exec gnb-ns ip link del ziti1 2>/dev/null || true
+	@sleep 1
 	sudo ip netns exec gnb-ns \
 		nohup $(ZET) run \
-		--identity-dir $(PKI_DIR)/identities/ \
+		--identity $(PKI_DIR)/identities/gnb-01.json \
 		--dns-ip-range "100.64.0.0/10" \
 		--verbose 2 \
 		> $(LOG_DIR)/tunnel-gnb.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/tunnel-gnb.pid
+	@sudo ip netns exec gnb-ns pgrep -f "ziti-edge-tunnel run --identity" | tail -n1 > $(DATA_DIR)/tunnel-gnb.pid || true
 	@sleep 3
 	@echo "✓ gNB Tunneler 已在 gnb-ns 內啟動"
 	@echo ">>> 添加 UPF 路由（tproxy 攔截需要）..."
@@ -341,7 +373,7 @@ start-tunnel-gnb:
 		nohup socat SCTP-LISTEN:38412,bind=127.0.0.1,fork,reuseaddr \
 		TCP:amf.ziti:38412 \
 		> $(LOG_DIR)/socat-n2-gnb.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/socat-gnb.pid
+	@sudo ip netns exec gnb-ns pgrep -f "socat SCTP-LISTEN:38412" | tail -n1 > $(DATA_DIR)/socat-gnb.pid || true
 	@echo "✓ socat-gnb 已啟動 (SCTP:38412→TCP:amf.ziti:38412)"
 
 # =============================================================================
