@@ -277,10 +277,12 @@ apply-policies:
 enroll-gnb:
 	@for jwt in $(PKI_DIR)/identities/gnb-*.jwt; do \
 		name=$$(basename $$jwt .jwt); \
-		if [ ! -f $(PKI_DIR)/identities/$$name.json ]; then \
+		json="$(PKI_DIR)/identities/$$name.json"; \
+		if [ ! -f $$json ] || [ $$jwt -nt $$json ]; then \
 			echo ">>> Enrolling $$name ..."; \
+			rm -f $$json; \
 			$(ZET) enroll --jwt $$jwt \
-				--identity $(PKI_DIR)/identities/$$name.json; \
+				--identity $$json; \
 		else \
 			echo "[skip] $$name 已 enroll"; \
 		fi \
@@ -290,10 +292,12 @@ enroll-gnb:
 enroll-core:
 	@for jwt in $(PKI_DIR)/identities/core-*.jwt; do \
 		name=$$(basename $$jwt .jwt); \
-		if [ ! -f $(PKI_DIR)/identities/$$name.json ]; then \
+		json="$(PKI_DIR)/identities/$$name.json"; \
+		if [ ! -f $$json ] || [ $$jwt -nt $$json ]; then \
 			echo ">>> Enrolling $$name ..."; \
+			rm -f $$json; \
 			$(ZET) enroll --jwt $$jwt \
-				--identity $(PKI_DIR)/identities/$$name.json; \
+				--identity $$json; \
 		else \
 			echo "[skip] $$name 已 enroll"; \
 		fi \
