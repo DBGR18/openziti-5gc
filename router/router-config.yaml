@@ -6,13 +6,12 @@
 #   10.10.1.1 (gnb-ns 側)   10.10.2.1 (core-ns 側)   10.10.3.1 (Host 側)
 # =============================================================================
 v: 3
-
 identity:
   cert:        pki/ca/certs/router-client.cert
   key:         pki/ca/keys/router-client.key
-  ca:          pki/ca/cas/ca.cert
-  server_cert: pki/ca/certs/router-server.chain.pem
-  server_key:  pki/ca/keys/router-server.key
+  ca:          pki/ca/certs/ca.cert
+  server_cert: pki/ca/certs/router-server.cert
+  server_key:  pki/ca/keys/router-client.key
 
 ctrl:
   # Controller 在同一個 router-ns，用 localhost 即可
@@ -28,8 +27,8 @@ listeners:
   - binding: edge
     address: tls:0.0.0.0:3022
     options:
-      # gnb-ns 透過 10.10.1.1 連入，core-ns 透過 10.10.2.1 連入
-      advertise: 10.10.1.1:3022
+      # 透過 router-ns 的 Host 側位址對外廣播，gnb/core 皆可達
+      advertise: 10.10.3.1:3022
       maxConnections: 32768
 
 edge:

@@ -12,7 +12,7 @@
 # =============================================================================
 
 # Identity 檔案位置（enroll 後生成的 JSON）
-identity_dir: /home/dbgr/openziti-5gc/pki/identities
+# identity_dir: /home/dbgr/openziti-5gc/pki/identities
 
 # 注意：ziti-edge-tunnel 不使用 YAML 設定檔啟動
 # 它的所有設定都透過命令列參數傳入
