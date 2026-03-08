@@ -144,10 +144,14 @@ log "free5gc 已在 core-ns 內啟動"
 # =============================================================================
 step "Phase 8: Core-side Tunneler + socat (core-ns)"
 # =============================================================================
+# Core-side 僅載入 core identities
+mkdir -p "$PROJECT_DIR/data/core-identities"
+cp -f "$PROJECT_DIR"/pki/identities/core-*.json "$PROJECT_DIR/data/core-identities/" 2>/dev/null || true
+
 # Core 側 Tunneler: run-host 模式（不需 tproxy）
 ip netns exec core-ns \
     nohup "$ZET" run-host \
-        --identity-dir "$PROJECT_DIR/pki/identities/" \
+        --identity-dir "$PROJECT_DIR/data/core-identities/" \
         --verbose 2 \
         > "$PROJECT_DIR/logs/tunnel-core.log" 2>&1 &
 echo $! > "$PROJECT_DIR/data/tunnel-core.pid"
@@ -165,10 +169,14 @@ log "Core-side Tunneler + socat 啟動"
 # =============================================================================
 step "Phase 9: gNB-side Tunneler + socat (gnb-ns)"
 # =============================================================================
+# gnb-ns 內 DNS 指向 Ziti DNS
+mkdir -p /etc/netns/gnb-ns
+echo -e "nameserver 100.64.0.1\noptions timeout:1 attempts:1" > /etc/netns/gnb-ns/resolv.conf
+
 # gNB 側 Tunneler: run 模式（tproxy）
 ip netns exec gnb-ns \
     nohup "$ZET" run \
-        --identity-dir "$PROJECT_DIR/pki/identities/" \
+        --identity "$PROJECT_DIR/pki/identities/gnb-01.json" \
         --dns-ip-range "100.64.0.0/10" \
         --verbose 2 \
         > "$PROJECT_DIR/logs/tunnel-gnb.log" 2>&1 &
