@@ -7,9 +7,9 @@
 #  ┌──────────┐         ┌──────────────┐         ┌──────────┐
 #  │  gnb-ns  │ veth    │  router-ns   │ veth    │  core-ns │
 #  │10.10.1.2 ├────────►│10.10.1.1     │         │          │
-#  │          │         │       10.10.2.1├───────►│10.10.2.2 │
-#  └──────────┘         │       10.10.3.1│        └──────────┘
-#                       └───────┬────────┘
+#  │          │         │     10.10.2.1├───────► │10.10.2.2 │
+#  └──────────┘         │     10.10.3.1│         └──────────┘
+#                       └───────┬──────┘
 #                               │ veth
 #                    Host (10.10.3.2)
 #                    (管理 CLI / MongoDB)
@@ -117,6 +117,9 @@ create_namespaces() {
     # Host 到各 namespace 的路由
     ip route add 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
     ip route add 10.10.2.0/24 via 10.10.3.1 2>/dev/null || true
+    # UE IP pool 回程路由（N6 回來後需可回送到 router-ns）
+    ip route add 10.60.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
+    ip route add 10.61.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
 
     # Router: 不開啟 IP 轉發！
     # gnb-ns 和 core-ns 之間不能直接通訊
@@ -126,7 +129,17 @@ create_namespaces() {
     # 但 Router 需要轉發 Host(10.10.3.0/24) ↔ gnb/core 的管理流量
     # 所以我們用 iptables 精確控制：只轉發管理流量，不轉發 gnb↔core
     ip netns exec "$NS_ROUTER" sysctl -w net.ipv4.ip_forward=1 > /dev/null
-    # 禁止 gnb-ns ↔ core-ns 直接轉發
+
+    # Router 對 UE pool 的回程路由（外網回包經 Host -> Router -> Core/UPF）
+    ip netns exec "$NS_ROUTER" ip route add 10.60.0.0/16 via 10.10.2.2 dev veth-core-r 2>/dev/null || true
+    ip netns exec "$NS_ROUTER" ip route add 10.61.0.0/16 via 10.10.2.2 dev veth-core-r 2>/dev/null || true
+    # 允許 N3 使用者面（GTP-U, UDP/2152）在 gnb-ns ↔ core-ns 之間轉發
+    ip netns exec "$NS_ROUTER" iptables -A FORWARD \
+        -s 10.10.1.0/24 -d 10.10.2.0/24 -p udp --dport 2152 -j ACCEPT
+    ip netns exec "$NS_ROUTER" iptables -A FORWARD \
+        -s 10.10.2.0/24 -d 10.10.1.0/24 -p udp --sport 2152 -j ACCEPT
+
+    # 禁止其餘 gnb-ns ↔ core-ns 直接轉發
     ip netns exec "$NS_ROUTER" iptables -A FORWARD \
         -s 10.10.1.0/24 -d 10.10.2.0/24 -j DROP
     ip netns exec "$NS_ROUTER" iptables -A FORWARD \
@@ -144,9 +157,13 @@ create_namespaces() {
     done
 
     # --- NAT: 讓各 namespace 能上網（下載、enroll 等需要） ---
-    # 從 router-ns 到 Host 的 NAT（讓 gnb-ns/core-ns 透過 Host 上網）
+    # 從 router-ns 到 Host 的 NAT（讓 gnb-ns/router-ns 管理流量可上網）
     sysctl -w net.ipv4.ip_forward=1 > /dev/null
     iptables -t nat -A POSTROUTING -s 10.10.3.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
+    # core-ns 出口流量（例如 NF 對外連線）
+    iptables -t nat -A POSTROUTING -s 10.10.2.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
+    # UE PDU 位址池對外流量（經 UPF/N6）
+    iptables -t nat -A POSTROUTING -s 10.60.0.0/16 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
 
     # router-ns 到 Host 的預設路由（讓 router-ns 內的程式能上網）
     ip netns exec "$NS_ROUTER" ip route add default via 10.10.3.2
@@ -207,7 +224,11 @@ delete_namespaces() {
     # 清理路由與 NAT
     ip route del 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
     ip route del 10.10.2.0/24 via 10.10.3.1 2>/dev/null || true
+    ip route del 10.60.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
+    ip route del 10.61.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.10.3.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 10.10.2.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 10.60.0.0/16 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
 
     # 清理 DNS
     rm -rf /etc/netns/"$NS_GNB" /etc/netns/"$NS_ROUTER" /etc/netns/"$NS_CORE" 2>/dev/null || true
