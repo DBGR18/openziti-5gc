@@ -12,7 +12,7 @@ db: data/ctrl.db
 identity:
   cert:        pki/ca/certs/ctrl-client.cert
   key:         pki/ca/keys/ctrl-client.key
-  ca:          pki/ca/cas/ca.cert
+  ca:          pki/ca/certs/ca.cert
   server_cert: pki/ca/certs/ctrl-server.chain.pem
   server_key:  pki/ca/keys/ctrl-server.key
 
@@ -39,7 +39,7 @@ edge:
   api:
     listener: 0.0.0.0:1280
     # Host 透過 10.10.3.1 管理，gnb-ns 用 10.10.1.1，core-ns 用 10.10.2.1
-    advertise: 10.10.3.1:1280
+    address: 10.10.3.1:1280
     sessionTimeout: 30m
     activityTimeout: 10m
 
