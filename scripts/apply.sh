@@ -117,7 +117,7 @@ apply_identities() {
         roles=$(yq ".identities[$i].roleAttributes | join(\",\")" "$YAML_FILE")
 
         if ! resource_exists "identity" "$name"; then
-            $ZITI edge create identity "$type" "$name" \
+            $ZITI edge create identity "$name" \
                 -a "$roles" \
                 -o "${jwt_dir}/${name}.jwt" && \
                 echo "  [+] Identity '${name}' 建立成功 → JWT: ${jwt_dir}/${name}.jwt" || \
@@ -160,9 +160,13 @@ apply_service_policies() {
                 svc_roles+=($(yq ".servicePolicies[$i].serviceRoles[$j]" "$YAML_FILE"))
             done
 
+            local id_roles_csv svc_roles_csv
+            id_roles_csv=$(IFS=,; echo "${id_roles[*]}")
+            svc_roles_csv=$(IFS=,; echo "${svc_roles[*]}")
+
             $ZITI edge create service-policy "$name" "$type" \
-                --identity-roles "${id_roles[*]}" \
-                --service-roles "${svc_roles[*]}" && \
+                --identity-roles "$id_roles_csv" \
+                --service-roles "$svc_roles_csv" && \
                 echo "  [+] ServicePolicy '${name}' (${type}) 建立成功" || \
                 echo "  [!] ServicePolicy '${name}' 建立失敗"
         else
@@ -199,9 +203,13 @@ apply_router_policies() {
                 er_roles+=($(yq ".edgeRouterPolicies[$i].edgeRouterRoles[$j]" "$YAML_FILE"))
             done
 
+            local id_roles_csv er_roles_csv
+            id_roles_csv=$(IFS=,; echo "${id_roles[*]}")
+            er_roles_csv=$(IFS=,; echo "${er_roles[*]}")
+
             $ZITI edge create edge-router-policy "$name" \
-                --identity-roles "${id_roles[*]}" \
-                --edge-router-roles "${er_roles[*]}" && \
+                --identity-roles "$id_roles_csv" \
+                --edge-router-roles "$er_roles_csv" && \
                 echo "  [+] EdgeRouterPolicy '${name}' 建立成功" || \
                 echo "  [!] EdgeRouterPolicy '${name}' 建立失敗"
         else
@@ -233,9 +241,13 @@ apply_router_policies() {
                 er_roles+=($(yq ".serviceEdgeRouterPolicies[$i].edgeRouterRoles[$j]" "$YAML_FILE"))
             done
 
+            local svc_roles_csv er_roles_csv
+            svc_roles_csv=$(IFS=,; echo "${svc_roles[*]}")
+            er_roles_csv=$(IFS=,; echo "${er_roles[*]}")
+
             $ZITI edge create service-edge-router-policy "$name" \
-                --service-roles "${svc_roles[*]}" \
-                --edge-router-roles "${er_roles[*]}" && \
+                --service-roles "$svc_roles_csv" \
+                --edge-router-roles "$er_roles_csv" && \
                 echo "  [+] ServiceEdgeRouterPolicy '${name}' 建立成功" || \
                 echo "  [!] ServiceEdgeRouterPolicy '${name}' 建立失敗"
         else
