@@ -1,0 +1,35 @@
+# =============================================================================
+# UERANSIM gNB — 適用於 gnb-ns namespace + Ziti 保護
+#
+# 重要：
+#   linkIp/ngapIp/gtpIp: 使用 127.0.0.1 (gnb-ns 內的 loopback)
+#   AMF address: 連到本地 socat (127.0.0.1:38412)
+#     socat 把 SCTP → TCP → Ziti Tunneler → Ziti Fabric
+#     → Core Tunneler → socat → AMF
+#
+#   N3 GTP-U:
+#     gNB 送 UDP 到 AMF 告知的 UPF 地址 (10.10.2.2:2152)
+#     → gnb-ns 內的 Tunneler tproxy 攔截
+#     → Ziti Fabric → Core Tunneler → UPF
+# =============================================================================
+
+mcc: '208'
+mnc: '93'
+nci: '0x000000010'
+idLength: 32
+tac: 1
+
+linkIp: 127.0.0.1     # gNB 內部連線（gnb-ns loopback）
+ngapIp: 127.0.0.1     # N2 本地端（gNB 側）
+gtpIp:  10.10.1.2     # N3 位址（供 UPF 下行送回 gNB）
+
+# AMF 連線 — 指向本地 socat (SCTP:38412 → TCP → Ziti)
+amfConfigs:
+  - address: 127.0.0.1
+    port: 38412
+
+slices:
+  - sst: 0x1
+    sd: 0x010203
+
+ignoreStreamIds: true
