@@ -67,7 +67,7 @@ tac: 1
 
 linkIp: 127.0.0.1     # gNB 內部連線（gnb-ns loopback）
 ngapIp: 127.0.0.1     # N2 本地端（gNB 側）
-gtpIp:  127.0.0.1     # N3 本地端（gNB 側）
+gtpIp:  10.10.1.2     # N3 位址（供 UPF 下行送回 gNB）
 
 # AMF 連線 — 指向本地 socat (SCTP:38412 → TCP → Ziti)
 amfConfigs:
@@ -166,6 +166,14 @@ start_gnb() {
     # 10.10.2.2 是 core-ns 的 IP，gNB 會嘗試送 GTP-U 到這裡
     # tproxy 會在 OUTPUT chain 攔截，但需要路由先存在
     ns_exec ip route add 10.10.2.0/24 via 10.10.1.1 2>/dev/null || true
+    # 確保 gNB-side Tunneler 一直能連到 Controller 管理位址
+    # 避免 UE 啟動後將 10.10.3.1 誤導到 uesimtun0
+    ns_exec ip route replace 10.10.3.1/32 via 10.10.1.1 dev veth-gnb 2>/dev/null || true
+
+    # 下行 N3：UPF 送往 10.10.1.2:2152，轉送到 nr-gnb 實際監聽的 127.0.0.1:2152
+    ns_exec sysctl -w net.ipv4.conf.all.route_localnet=1 > /dev/null || true
+    ns_exec iptables -t nat -C PREROUTING -i veth-gnb -p udp -d 10.10.1.2 --dport 2152 -j DNAT --to-destination 127.0.0.1:2152 2>/dev/null || \
+        ns_exec iptables -t nat -I PREROUTING -i veth-gnb -p udp -d 10.10.1.2 --dport 2152 -j DNAT --to-destination 127.0.0.1:2152
 
     # 啟動 gNB
     ns_exec "${UERANSIM_DIR}/build/nr-gnb" \
@@ -204,6 +212,15 @@ start_ue() {
     echo "  UE PID: $UE_PID"
 
     sleep 2
+
+    # UE 啟動後再次釘住 Controller 路由，避免被 rt_uesimtun0 蓋掉
+    ns_exec ip route replace 10.10.3.1/32 via 10.10.1.1 dev veth-gnb 2>/dev/null || true
+
+    # UERANSIM 在 PDU Session 建立後可能再次改寫主路由表，延後再補一次
+    (
+        sleep 25
+        ns_exec ip route replace 10.10.3.1/32 via 10.10.1.1 dev veth-gnb 2>/dev/null || true
+    ) &
 
     if kill -0 "$UE_PID" 2>/dev/null; then
         echo "✓ UE 已在 $NS 內啟動"
