@@ -521,3 +521,7 @@ clean-all: clean
 	rm -rf $(BIN_DIR) $(PKI_DIR) $(DATA_DIR) $(LOG_DIR)
 	rm -f .admin-password
 	@echo "✓ 全部清理完成"
+
+# =============================================================================
+resume: start-controller start-router start-core start-tunnel-core start-tunnel-gnb start-gnb start-ue
+	@echo "✓ 所有服務已恢復運行"
