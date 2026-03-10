@@ -3,16 +3,17 @@
 # setup-namespaces.sh — 三 Namespace 隔離拓撲
 #
 # 最擬真的單機部署：gNB、Router、Core 各在獨立的 Network Namespace。
+# N2/N3 走 Ziti overlay，N6（外網出口）由 core-ns 直接接到 Host。
 #
 #  ┌──────────┐         ┌──────────────┐         ┌──────────┐
 #  │  gnb-ns  │ veth    │  router-ns   │ veth    │  core-ns │
-#  │10.10.1.2 ├────────►│10.10.1.1     │         │          │
-#  │          │         │     10.10.2.1├───────► │10.10.2.2 │
-#  └──────────┘         │     10.10.3.1│         └──────────┘
-#                       └───────┬──────┘
+#  │10.10.1.2 ├────────►│10.10.1.1     │         │10.10.2.2 │
+#  │          │         │     10.10.2.1├───────► │          │
+#  └──────────┘         │     10.10.3.1│         │10.10.4.1 ├── veth ── Host (10.10.4.2)
+#                       └───────┬──────┘         └──────────┘
 #                               │ veth
 #                    Host (10.10.3.2)
-#                    (管理 CLI / MongoDB)
+#                    (管理 CLI / Internet uplink)
 #
 # 關鍵隔離：
 #   gnb-ns 只能到達 router-ns (10.10.1.0/24)
@@ -47,6 +48,10 @@ CORE_IP="10.10.2.2/24"
 ROUTER_HOST_IP="10.10.3.1/24"
 HOST_IP="10.10.3.2/24"
 
+# Core ↔ Host (N6 / 外網出口): 10.10.4.0/24
+CORE_HOST_IP="10.10.4.1/24"
+HOST_CORE_IP="10.10.4.2/24"
+
 create_namespaces() {
     echo "=== 建立三個 Network Namespaces ==="
 
@@ -59,6 +64,7 @@ create_namespaces() {
         fi
     done
     ip link del veth-host 2>/dev/null || true
+    ip link del veth-host-core 2>/dev/null || true
     sleep 0.5
 
     # --- 建立 Namespaces ---
@@ -105,21 +111,32 @@ create_namespaces() {
     ip netns exec "$NS_ROUTER" ip addr add "$ROUTER_HOST_IP" dev veth-host-r
     ip netns exec "$NS_ROUTER" ip link set veth-host-r up
 
+    # --- veth pair 4: Core ↔ Host (10.10.4.0/24) N6 用 ---
+    echo ">>> veth: core-ns ↔ Host (N6 出口)..."
+    ip link add veth-host-core type veth peer name veth-core-host
+    ip link set veth-core-host netns "$NS_CORE"
+
+    ip addr add "$HOST_CORE_IP" dev veth-host-core
+    ip link set veth-host-core up
+
+    ip netns exec "$NS_CORE" ip addr add "$CORE_HOST_IP" dev veth-core-host
+    ip netns exec "$NS_CORE" ip link set veth-core-host up
+
     # --- 路由設定 ---
     echo ">>> 設定路由..."
 
     # gNB 預設閘道 → Router (只能到 10.10.1.0/24)
     ip netns exec "$NS_GNB" ip route add default via 10.10.1.1
 
-    # Core 預設閘道 → Router (只能到 10.10.2.0/24)
-    ip netns exec "$NS_CORE" ip route add default via 10.10.2.1
+    # Core 預設閘道 → Host（N6 出口直連）
+    ip netns exec "$NS_CORE" ip route add default via 10.10.4.2 dev veth-core-host
 
     # Host 到各 namespace 的路由
     ip route add 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
     ip route add 10.10.2.0/24 via 10.10.3.1 2>/dev/null || true
-    # UE IP pool 回程路由（N6 回來後需可回送到 router-ns）
-    ip route add 10.60.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
-    ip route add 10.61.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
+    # UE IP pool 回程路由（N6 回來後直接回 core-ns）
+    ip route add 10.60.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
+    ip route add 10.61.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
 
     # Router: 不開啟 IP 轉發！
     # gnb-ns 和 core-ns 之間不能直接通訊
@@ -129,15 +146,6 @@ create_namespaces() {
     # 但 Router 需要轉發 Host(10.10.3.0/24) ↔ gnb/core 的管理流量
     # 所以我們用 iptables 精確控制：只轉發管理流量，不轉發 gnb↔core
     ip netns exec "$NS_ROUTER" sysctl -w net.ipv4.ip_forward=1 > /dev/null
-
-    # Router 對 UE pool 的回程路由（外網回包經 Host -> Router -> Core/UPF）
-    ip netns exec "$NS_ROUTER" ip route add 10.60.0.0/16 via 10.10.2.2 dev veth-core-r 2>/dev/null || true
-    ip netns exec "$NS_ROUTER" ip route add 10.61.0.0/16 via 10.10.2.2 dev veth-core-r 2>/dev/null || true
-    # 允許 N3 使用者面（GTP-U, UDP/2152）在 gnb-ns ↔ core-ns 之間轉發
-    ip netns exec "$NS_ROUTER" iptables -A FORWARD \
-        -s 10.10.1.0/24 -d 10.10.2.0/24 -p udp --dport 2152 -j ACCEPT
-    ip netns exec "$NS_ROUTER" iptables -A FORWARD \
-        -s 10.10.2.0/24 -d 10.10.1.0/24 -p udp --sport 2152 -j ACCEPT
 
     # 禁止其餘 gnb-ns ↔ core-ns 直接轉發
     ip netns exec "$NS_ROUTER" iptables -A FORWARD \
@@ -160,7 +168,8 @@ create_namespaces() {
     # 從 router-ns 到 Host 的 NAT（讓 gnb-ns/router-ns 管理流量可上網）
     sysctl -w net.ipv4.ip_forward=1 > /dev/null
     iptables -t nat -A POSTROUTING -s 10.10.3.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
-    # core-ns 出口流量（例如 NF 對外連線）
+    # core-ns 出口流量（透過 N6 直連 Host）
+    iptables -t nat -A POSTROUTING -s 10.10.4.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -A POSTROUTING -s 10.10.2.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     # UE PDU 位址池對外流量（經 UPF/N6）
     iptables -t nat -A POSTROUTING -s 10.60.0.0/16 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
@@ -176,6 +185,9 @@ create_namespaces() {
 
     echo -n "  core-ns → router-ns (10.10.2.1): "
     ip netns exec "$NS_CORE" ping -c 1 -W 2 10.10.2.1 > /dev/null 2>&1 && echo "✓" || echo "✗"
+
+    echo -n "  core-ns → Host N6 (10.10.4.2): "
+    ip netns exec "$NS_CORE" ping -c 1 -W 2 10.10.4.2 > /dev/null 2>&1 && echo "✓" || echo "✗"
 
     echo -n "  Host → router-ns (10.10.3.1): "
     ping -c 1 -W 2 10.10.3.1 > /dev/null 2>&1 && echo "✓" || echo "✗"
@@ -197,6 +209,7 @@ create_namespaces() {
     echo "  gnb-ns  (10.10.1.2)  ────  router-ns  (10.10.1.1)"
     echo "                              (10.10.2.1) ────  core-ns (10.10.2.2)"
     echo "                              (10.10.3.1) ────  Host    (10.10.3.2)"
+    echo "  core-ns (10.10.4.1)   ────  Host    (10.10.4.2)  [N6 egress]"
     echo ""
     echo "  gnb-ns ←✗→ core-ns (隔離，流量必須經 Ziti)"
     echo ""
@@ -220,13 +233,15 @@ delete_namespaces() {
     done
 
     ip link del veth-host 2>/dev/null || true
+    ip link del veth-host-core 2>/dev/null || true
 
     # 清理路由與 NAT
     ip route del 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
     ip route del 10.10.2.0/24 via 10.10.3.1 2>/dev/null || true
-    ip route del 10.60.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
-    ip route del 10.61.0.0/16 via 10.10.3.1 dev veth-host 2>/dev/null || true
+    ip route del 10.60.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
+    ip route del 10.61.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.10.3.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
+    iptables -t nat -D POSTROUTING -s 10.10.4.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.10.2.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.60.0.0/16 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
 
@@ -265,6 +280,7 @@ show_status() {
 
     echo "--- Host 側 veth ---"
     ip -br addr show dev veth-host 2>/dev/null | sed 's/^/  /' || echo "  veth-host 不存在"
+    ip -br addr show dev veth-host-core 2>/dev/null | sed 's/^/  /' || echo "  veth-host-core 不存在"
     echo ""
 }
 
