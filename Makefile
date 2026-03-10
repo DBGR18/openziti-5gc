@@ -4,6 +4,7 @@
 # =============================================================================
 
 SHELL        := /bin/bash
+.DEFAULT_GOAL := help
 PROJECT_DIR  := $(shell pwd)
 BIN_DIR      := $(PROJECT_DIR)/bin
 PKI_DIR      := $(PROJECT_DIR)/pki
@@ -40,46 +41,42 @@ ZET           := $(BIN_DIR)/ziti-edge-tunnel
         status clean systemd-install \
         ns-create ns-delete ns-status \
         start-core stop-core start-gnb stop-gnb \
-        deploy stop-all
+	deploy stop-all verify verify-active \
+	controller router enroll core tunneler gnb ue \
+	rebuild clean-rebuild
 
 # =============================================================================
 # 說明
 # =============================================================================
 help:
 	@echo ""
-	@echo "=== OpenZiti 5GC 三 Namespace 部署 ==="
+	@echo "=== OpenZiti 5GC Three Namespace Deployment  ==="
 	@echo ""
-	@echo "  一鍵部署："
-	@echo "    make deploy           一鍵部署所有組件（需 sudo）"
-	@echo ""
-	@echo "  初次完整部署（依序執行）："
+	@echo "  必要指令："
 	@echo "    make dirs             建立目錄"
-	@echo "    make download         下載預編譯 binary"
-	@echo "    sudo make ns-create   建立三個 namespace"
-	@echo "    make pki              生成 PKI 憑證"
-	@echo "    make controller-init  初始化 Controller"
-	@echo "    make start-controller 啟動 Controller（router-ns）"
-	@echo "    make router-init      註冊 Router"
-	@echo "    make start-router     啟動 Router（router-ns）"
-	@echo "    make login            登入管理 API"
-	@echo "    make apply            套用服務與策略"
-	@echo "    make enroll-gnb       Enroll gNB Identity"
-	@echo "    make enroll-core      Enroll Core Identity"
-	@echo "    sudo make start-core  啟動 free5gc（core-ns）"
-	@echo "    sudo make start-tunnel-core 啟動 Core Tunneler（core-ns）"
-	@echo "    sudo make start-tunnel-gnb  啟動 gNB Tunneler（gnb-ns）"
-	@echo "    sudo make start-gnb   啟動 UERANSIM gNB（gnb-ns）"
+	@echo "    sudo make ns-create   建立 namespace"
+	@echo "    make pki              生成 PKI"
+	@echo "    make controller       初始化並啟動 Controller"
+	@echo "    make router           註冊並啟動 Router"
+	@echo "    make apply            套用服務/身份/策略"
+	@echo "    make enroll           Enroll 全部 Identity"
+	@echo "    sudo make core        啟動 free5gc"
+	@echo "    sudo make tunneler    啟動 core/gnb Tunneler"
+	@echo "    sudo make gnb         啟動 gNB"
+	@echo "    sudo make ue          啟動 UE"
 	@echo ""
-	@echo "  日常操作："
-	@echo "    make status           檢查各組件狀態"
-	@echo "    sudo make ns-status   檢查 namespace 狀態"
+	@echo "  一鍵流程："
+	@echo "    sudo make rebuild     clean-all 後依序完整重建"
+	@echo "    sudo make resume      啟動既有環境"
+	@echo ""
+	@echo "  驗證與清理："
+	@echo "    sudo make verify      被動驗證"
+	@echo "    sudo make verify-active 主動驗證"
 	@echo "    sudo make stop-all    停止所有服務"
-	@echo "    make clean            清理資料（保留 binary）"
+	@echo "    make clean            清理 runtime 資料"
+	@echo "    make clean-all        清理 PKI/data/logs"
 	@echo ""
 
-# =============================================================================
-# 1. 建立目錄
-# =============================================================================
 dirs:
 	mkdir -p $(BIN_DIR) $(PKI_DIR)/identities
 	mkdir -p $(DATA_DIR) $(LOG_DIR)
@@ -87,7 +84,7 @@ dirs:
 	@echo "✓ 目錄建立完成"
 
 # =============================================================================
-# 2a. 下載預編譯 binary（推薦，最快）
+# 下載預編譯 binary
 # =============================================================================
 download: dirs
 	@echo ">>> 下載 ziti v$(ZITI_VERSION) ..."
@@ -103,10 +100,10 @@ download: dirs
 	@echo "✓ 下載完成"
 
 # =============================================================================
-# 2b. 從原始碼編譯（替代方案）
+# 從原始碼編譯
 # =============================================================================
 build-from-source: dirs
-	@echo ">>> 克隆 openziti/ziti 原始碼..."
+	@echo ">>> clone openziti/ziti source code..."
 	@if [ ! -d /tmp/ziti-src ]; then \
 		git clone --depth 1 --branch "v$(ZITI_VERSION)" \
 			https://github.com/openziti/ziti.git /tmp/ziti-src; \
@@ -118,7 +115,7 @@ build-from-source: dirs
 	@echo "✓ 從原始碼編譯完成"
 
 # =============================================================================
-# 2c. 安裝 ziti-edge-tunnel（從套件庫或下載）
+# 安裝 ziti-edge-tunnel
 # =============================================================================
 install-tunnel: dirs
 	@echo ">>> 安裝 ziti-edge-tunnel..."
@@ -131,9 +128,6 @@ install-tunnel: dirs
 	$(ZET) version || true
 	@echo "✓ ziti-edge-tunnel 安裝完成"
 
-# =============================================================================
-# 3. 生成 PKI 憑證
-# =============================================================================
 pki:
 	@echo ">>> 生成 Root CA..."
 	@echo ">>> 預先建立所有憑證的目錄結構..."
@@ -177,9 +171,6 @@ pki:
 		--client-name "Router Client"
 	@echo "✓ PKI 憑證生成完成（位於 $(PKI_DIR)）"
 
-# =============================================================================
-# 4. 初始化 Controller
-# =============================================================================
 controller-init:
 	@echo ">>> 初始化 Controller 資料庫..."
 	$(ZITI) controller edge init $(CTRL_CFG) \
@@ -188,9 +179,6 @@ controller-init:
 	@chmod 600 .admin-password
 	@echo "✓ Controller 初始化完成（密碼存於 .admin-password）"
 
-# =============================================================================
-# 5. 啟動/停止 Controller
-# =============================================================================
 start-controller:
 	@echo ">>> 在 router-ns 內啟動 Controller..."
 	sudo ip netns exec router-ns nohup $(ZITI) controller run $(CTRL_CFG) > $(LOG_DIR)/controller.log 2>&1 &
@@ -208,9 +196,9 @@ stop-controller:
 		echo "Controller 未在執行"; \
 	fi
 
-# =============================================================================
-# 6. 初始化 Router（向 Controller 註冊）
-# =============================================================================
+controller: controller-init start-controller
+	@echo "✓ Controller 流程完成"
+
 router-init: login
 	@echo ">>> 建立 Edge Router..."
 	$(ZITI) edge create edge-router main-router \
@@ -221,9 +209,6 @@ router-init: login
 		--jwt $(DATA_DIR)/main-router.jwt
 	@echo "✓ Router 註冊完成"
 
-# =============================================================================
-# 7. 啟動/停止 Router
-# =============================================================================
 start-router:
 	@echo ">>> 在 router-ns 內啟動 Router..."
 	sudo ip netns exec router-ns \
@@ -242,18 +227,15 @@ stop-router:
 		echo "Router 未在執行"; \
 	fi
 
-# =============================================================================
-# 8. 登入管理 API
-# =============================================================================
+router: router-init start-router
+	@echo "✓ Router 流程完成"
+
 login:
 	@echo ">>> 登入 Ziti Controller..."
 	$(ZITI) edge login https://$(CTRL_HOST):$(CTRL_MGMT_PORT) \
 		-u "$(ADMIN_USER)" -p "$(ADMIN_PASS)" \
 		--yes
 
-# =============================================================================
-# 9. 套用所有設定檔
-# =============================================================================
 apply: login apply-services apply-identities apply-policies
 	@echo ""
 	@echo "✓ 所有服務、身份、策略已套用！"
@@ -271,9 +253,6 @@ apply-policies:
 	$(SCRIPTS_DIR)/apply.sh policies $(POLICY_DIR)/service-policies.yml
 	$(SCRIPTS_DIR)/apply.sh router-policies $(POLICY_DIR)/edge-router-policies.yml
 
-# =============================================================================
-# 10. Enroll Identity 並啟動 Tunnel
-# =============================================================================
 enroll-gnb:
 	@for jwt in $(PKI_DIR)/identities/gnb-*.jwt; do \
 		name=$$(basename $$jwt .jwt); \
@@ -304,11 +283,15 @@ enroll-core:
 	done
 	@echo "✓ Core Identity enroll 完成"
 
+enroll: enroll-gnb enroll-core
+	@echo "✓ 全部 Identity enroll 完成"
+
 start-tunnel-core:
 	@echo ">>> 在 core-ns 內啟動 Tunneler (run-host 模式)..."
-	@echo ">>> 準備 core-side identities ..."
-	@mkdir -p $(DATA_DIR)/core-identities
-	@cp -f $(PKI_DIR)/identities/core-*.json $(DATA_DIR)/core-identities/ 2>/dev/null || true
+	@echo ">>> 準備 core-side host identities ..."
+	@mkdir -p $(DATA_DIR)/core-host-identities
+	@cp -f $(PKI_DIR)/identities/core-amf-host.json $(DATA_DIR)/core-host-identities/ 2>/dev/null || true
+	@cp -f $(PKI_DIR)/identities/core-upf-host.json $(DATA_DIR)/core-host-identities/ 2>/dev/null || true
 	@echo ">>> 清理 core-ns 舊的 tunnel/socat ..."
 	-@if [ -f $(DATA_DIR)/tunnel-core.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/tunnel-core.pid) 2>/dev/null || true; \
@@ -318,18 +301,32 @@ start-tunnel-core:
 		sudo kill $$(cat $(DATA_DIR)/socat-core.pid) 2>/dev/null || true; \
 		rm -f $(DATA_DIR)/socat-core.pid; \
 	fi
+	-@if [ -f $(DATA_DIR)/tunnel-core-dial.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/tunnel-core-dial.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/tunnel-core-dial.pid; \
+	fi
 	-sudo ip netns exec core-ns pkill -f "socat TCP-LISTEN:38413" 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti0 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti1 2>/dev/null || true
 	@sleep 1
 	sudo ip netns exec core-ns \
 		nohup $(ZET) run-host \
-		--identity-dir $(DATA_DIR)/core-identities/ \
+		--identity-dir $(DATA_DIR)/core-host-identities/ \
 		--verbose 2 \
 		> $(LOG_DIR)/tunnel-core.log 2>&1 &
 	@sudo ip netns exec core-ns pgrep -f "ziti-edge-tunnel run-host" | tail -n1 > $(DATA_DIR)/tunnel-core.pid || true
 	@sleep 2
 	@echo "✓ Core Tunneler 已在 core-ns 內啟動"
+	@echo ">>> 啟動 core-upf-dialer (run 模式，用於 N3 下行攔截)..."
+	sudo ip netns exec core-ns \
+		nohup $(ZET) run \
+		--identity $(PKI_DIR)/identities/core-upf-dialer.json \
+		--dns-ip-range "100.64.0.0/10" \
+		--verbose 2 \
+		> $(LOG_DIR)/tunnel-core-dial.log 2>&1 &
+	@sudo ip netns exec core-ns pgrep -f "ziti-edge-tunnel run --identity $(PKI_DIR)/identities/core-upf-dialer.json" | tail -n1 > $(DATA_DIR)/tunnel-core-dial.pid || true
+	@sleep 2
+	@echo "✓ core-upf-dialer 已啟動（N3 downlink intercept）"
 	@echo ">>> 啟動 N2 socat (core-ns 內)..."
 	sudo ip netns exec core-ns \
 		nohup socat TCP-LISTEN:38413,bind=127.0.0.1,fork,reuseaddr \
@@ -376,15 +373,15 @@ start-tunnel-gnb:
 	@sudo ip netns exec gnb-ns pgrep -f "socat SCTP-LISTEN:38412" | tail -n1 > $(DATA_DIR)/socat-gnb.pid || true
 	@echo "✓ socat-gnb 已啟動 (SCTP:38412→TCP:amf.ziti:38412)"
 
-# =============================================================================
-# 10b. 啟動/停止 free5gc (core-ns) 和 UERANSIM (gnb-ns)
-# =============================================================================
 start-core:
 	@echo ">>> 在 core-ns 內啟動 free5gc..."
 	sudo bash $(SCRIPTS_DIR)/start-core.sh start
 
 stop-core:
 	sudo bash $(SCRIPTS_DIR)/start-core.sh stop
+
+core: start-core
+	@echo "✓ Core 流程完成"
 
 start-gnb:
 	@echo ">>> 在 gnb-ns 內啟動 UERANSIM gNB..."
@@ -397,9 +394,15 @@ start-ue:
 stop-gnb:
 	sudo bash $(SCRIPTS_DIR)/start-gnb.sh stop
 
-# =============================================================================
-# 11. 狀態檢查
-# =============================================================================
+tunneler: start-tunnel-core start-tunnel-gnb
+	@echo "✓ Tunneler 流程完成"
+
+gnb: start-gnb
+	@echo "✓ gNB 流程完成"
+
+ue: start-ue
+	@echo "✓ UE 流程完成"
+
 status:
 	@echo ""
 	@echo "=== OpenZiti 5GC 狀態 ==="
@@ -427,39 +430,7 @@ status:
 	@echo "--- 已註冊的 Identity ---"
 	@$(ZITI) edge list identities 2>/dev/null || echo "  (需先 make login)"
 
-# =============================================================================
-# 12. 安裝 systemd 服務（開機自啟）
-# =============================================================================
-systemd-install:
-	@echo ">>> 安裝 systemd 服務..."
-	@echo ">>> 安裝 socat（SCTP-TCP 轉換用）..."
-	sudo apt-get install -y socat || true
-	sudo cp $(PROJECT_DIR)/systemd/ziti-controller.service /etc/systemd/system/
-	sudo cp $(PROJECT_DIR)/systemd/ziti-router.service /etc/systemd/system/
-	sudo cp $(PROJECT_DIR)/systemd/ziti-tunnel-gnb.service /etc/systemd/system/
-	sudo cp $(PROJECT_DIR)/systemd/ziti-tunnel-core.service /etc/systemd/system/
-	sudo cp $(PROJECT_DIR)/systemd/socat-n2-gnb.service /etc/systemd/system/
-	sudo cp $(PROJECT_DIR)/systemd/socat-n2-core.service /etc/systemd/system/
-	sudo systemctl daemon-reload
-	@echo ""
-	@echo "✓ systemd 服務已安裝"
-	@echo ""
-	@echo "  === 共用組件 ==="
-	@echo "  sudo systemctl enable --now ziti-controller"
-	@echo "  sudo systemctl enable --now ziti-router"
-	@echo ""
-	@echo "  === gNB 側主機啟用 ==="
-	@echo "  sudo systemctl enable --now ziti-tunnel-gnb"
-	@echo "  sudo systemctl enable --now socat-n2-gnb"
-	@echo ""
-	@echo "  === 核網側主機啟用 ==="
-	@echo "  sudo systemctl enable --now ziti-tunnel-core"
-	@echo "  sudo systemctl enable --now socat-n2-core"
-	@echo ""
 
-# =============================================================================
-# 13. Network Namespace 管理（三 ns 拓撲）
-# =============================================================================
 ns-create:
 	@echo ">>> 建立三個 namespace (gnb-ns, router-ns, core-ns)..."
 	sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh create
@@ -471,16 +442,14 @@ ns-delete:
 ns-status:
 	sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh status
 
-# =============================================================================
-# 14. 一鍵部署（三 Namespace 版）
-# =============================================================================
-deploy:
-	@echo ">>> 執行三 Namespace 一鍵部署..."
-	sudo bash $(SCRIPTS_DIR)/deploy-3ns.sh
+verify:
+	@echo ">>> 執行 OpenZiti 被動驗證..."
+	sudo bash $(SCRIPTS_DIR)/verify-openziti.sh
 
-# =============================================================================
-# 15. 停止所有服務
-# =============================================================================
+verify-active:
+	@echo ">>> 執行 OpenZiti 主動驗證..."
+	sudo bash $(SCRIPTS_DIR)/verify-openziti.sh --active
+
 stop-all:
 	@echo ">>> 停止所有服務..."
 	-sudo bash $(SCRIPTS_DIR)/start-gnb.sh stop 2>/dev/null || true
@@ -492,6 +461,10 @@ stop-all:
 	-@if [ -f $(DATA_DIR)/tunnel-core.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/tunnel-core.pid) 2>/dev/null; \
 		rm -f $(DATA_DIR)/tunnel-core.pid; \
+	fi
+	-@if [ -f $(DATA_DIR)/tunnel-core-dial.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/tunnel-core-dial.pid) 2>/dev/null; \
+		rm -f $(DATA_DIR)/tunnel-core-dial.pid; \
 	fi
 	-@if [ -f $(DATA_DIR)/socat-gnb.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/socat-gnb.pid) 2>/dev/null; \
@@ -507,10 +480,10 @@ stop-all:
 	-sudo pkill -f "socat.*38412" 2>/dev/null || true
 	-sudo pkill -f "socat.*38413" 2>/dev/null || true
 	@echo "✓ 所有服務已停止"
+# =============================================================================
+resume: start-controller start-router start-core start-tunnel-core start-tunnel-gnb start-gnb start-ue
+	@echo "✓ 所有服務已恢復運行"
 
-# =============================================================================
-# 清理
-# =============================================================================
 clean: stop-all
 	@echo ">>> 清理資料..."
 	rm -rf $(DATA_DIR) $(LOG_DIR) $(PKI_DIR)/identities/*.json
@@ -518,10 +491,15 @@ clean: stop-all
 	@echo "✓ 清理完成（設定檔與 binary 保留）"
 
 clean-all: clean
-	rm -rf $(BIN_DIR) $(PKI_DIR) $(DATA_DIR) $(LOG_DIR)
+	rm -rf $(PKI_DIR) $(DATA_DIR) $(LOG_DIR)
 	rm -f .admin-password
 	@echo "✓ 全部清理完成"
 
 # =============================================================================
-resume: start-controller start-router start-core start-tunnel-core start-tunnel-gnb start-gnb start-ue
-	@echo "✓ 所有服務已恢復運行"
+build: dirs ns-create pki controller router apply enroll core tunneler gnb ue
+	@echo "✓ 已依序完成完整重建"
+
+clean-rebuild: clean-all build
+
+install: download install-tunnel build
+	@echo "✓ Binary 已準備就緒"
