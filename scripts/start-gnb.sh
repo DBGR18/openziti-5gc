@@ -170,10 +170,9 @@ start_gnb() {
     # 避免 UE 啟動後將 10.10.3.1 誤導到 uesimtun0
     ns_exec ip route replace 10.10.3.1/32 via 10.10.1.1 dev veth-gnb 2>/dev/null || true
 
-    # 下行 N3：UPF 送往 10.10.1.2:2152，轉送到 nr-gnb 實際監聽的 127.0.0.1:2152
-    ns_exec sysctl -w net.ipv4.conf.all.route_localnet=1 > /dev/null || true
-    ns_exec iptables -t nat -C PREROUTING -i veth-gnb -p udp -d 10.10.1.2 --dport 2152 -j DNAT --to-destination 127.0.0.1:2152 2>/dev/null || \
-        ns_exec iptables -t nat -I PREROUTING -i veth-gnb -p udp -d 10.10.1.2 --dport 2152 -j DNAT --to-destination 127.0.0.1:2152
+    # 下行 N3 改由 Ziti n3-gtpu-dl-service 直接投遞到 10.10.1.2:2152
+    # 清理舊版 veth-gnb -> 127.0.0.1 的 DNAT workaround（避免殘留規則干擾）
+    ns_exec iptables -t nat -D PREROUTING -i veth-gnb -p udp -d 10.10.1.2 --dport 2152 -j DNAT --to-destination 127.0.0.1:2152 2>/dev/null || true
 
     # 啟動 gNB
     ns_exec "${UERANSIM_DIR}/build/nr-gnb" \
