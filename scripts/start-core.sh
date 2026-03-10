@@ -303,14 +303,10 @@ start_core() {
     sleep 1
 
     # ---------------------------------------------------------------
-    # 2b. N3 下行封包修正（維持三 ns 架構下的最小必要轉換）
-    #   UPF 下行可能送到 127.0.0.1:2152，改寫到 gNB 可達的 10.10.1.2:2152
+    # 2b. 清理舊版 N3 下行 workaround（改由 Ziti n3-gtpu-dl-service 處理）
     # ---------------------------------------------------------------
-    ns_exec sysctl -w net.ipv4.conf.all.route_localnet=1 > /dev/null || true
-    ns_exec iptables -t nat -C OUTPUT -p udp -d 127.0.0.1 --sport 2152 --dport 2152 -j DNAT --to-destination 10.10.1.2:2152 2>/dev/null || \
-        ns_exec iptables -t nat -I OUTPUT -p udp -d 127.0.0.1 --sport 2152 --dport 2152 -j DNAT --to-destination 10.10.1.2:2152
-    ns_exec iptables -t nat -C POSTROUTING -p udp -d 10.10.1.2 --sport 2152 --dport 2152 -j SNAT --to-source 10.10.2.2 2>/dev/null || \
-        ns_exec iptables -t nat -I POSTROUTING -p udp -d 10.10.1.2 --sport 2152 --dport 2152 -j SNAT --to-source 10.10.2.2
+    ns_exec iptables -t nat -D OUTPUT -p udp -d 127.0.0.1 --sport 2152 --dport 2152 -j DNAT --to-destination 10.10.1.2:2152 2>/dev/null || true
+    ns_exec iptables -t nat -D POSTROUTING -p udp -d 10.10.1.2 --sport 2152 --dport 2152 -j SNAT --to-source 10.10.2.2 2>/dev/null || true
 
     # ---------------------------------------------------------------
     # 3. 啟動其他 NF（不需 sudo）
