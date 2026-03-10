@@ -39,10 +39,23 @@ YAML_FILE="$2"
 # 檢查資源是否已存在
 resource_exists() {
     local type="$1" name="$2"
-    local count
-    count=$($ZITI edge list "${type}s" "name=\"${name}\"" --output-json 2>/dev/null \
-        | jq -r '.data.totalCount // 0' 2>/dev/null || echo 0)
-    [ "$count" -gt 0 ]
+    local resource_name
+
+    case "$type" in
+        config) resource_name="configs" ;;
+        service) resource_name="services" ;;
+        identity) resource_name="identities" ;;
+        service-policy) resource_name="service-policies" ;;
+        edge-router-policy) resource_name="edge-router-policies" ;;
+        service-edge-router-policy) resource_name="service-edge-router-policies" ;;
+        *)
+            echo "ERROR: unsupported resource type '$type'" >&2
+            return 1
+            ;;
+    esac
+
+    $ZITI edge list "$resource_name" --output-json 2>/dev/null \
+        | jq -e --arg target "$name" '(.data // []) | map(.name) | index($target) != null' >/dev/null 2>&1
 }
 
 # =============================================================================
@@ -68,7 +81,9 @@ apply_services() {
                 echo "  [+] Config '${intercept_cfg_name}' 建立成功" || \
                 echo "  [!] Config '${intercept_cfg_name}' 建立失敗"
         else
-            echo "  [=] Config '${intercept_cfg_name}' 已存在"
+            $ZITI edge update config "$intercept_cfg_name" --data "$intercept_data" >/dev/null 2>&1 && \
+                echo "  [=] Config '${intercept_cfg_name}' 已更新" || \
+                echo "  [!] Config '${intercept_cfg_name}' 更新失敗"
         fi
 
         # 建立 host config
@@ -81,7 +96,9 @@ apply_services() {
                 echo "  [+] Config '${host_cfg_name}' 建立成功" || \
                 echo "  [!] Config '${host_cfg_name}' 建立失敗"
         else
-            echo "  [=] Config '${host_cfg_name}' 已存在"
+            $ZITI edge update config "$host_cfg_name" --data "$host_data" >/dev/null 2>&1 && \
+                echo "  [=] Config '${host_cfg_name}' 已更新" || \
+                echo "  [!] Config '${host_cfg_name}' 更新失敗"
         fi
 
         # 建立 service
@@ -92,9 +109,11 @@ apply_services() {
                 echo "  [+] Service '${name}' 建立成功" || \
                 echo "  [!] Service '${name}' 建立失敗"
         else
-            # 更新角色標籤
-            $ZITI edge update service "$name" -a "$roles" 2>/dev/null
-            echo "  [=] Service '${name}' 已存在（角色已更新: ${roles}）"
+            $ZITI edge update service "$name" \
+                --configs "${intercept_cfg_name},${host_cfg_name}" \
+                -a "$roles" >/dev/null 2>&1 && \
+                echo "  [=] Service '${name}' 已更新（configs/roles 已同步）" || \
+                echo "  [!] Service '${name}' 更新失敗"
         fi
     done
 }
@@ -139,38 +158,37 @@ apply_service_policies() {
     echo "  找到 ${count} 個 Service Policy 定義"
 
     for i in $(seq 0 $((count - 1))); do
-        local name type
+        local name type id_roles svc_roles id_count svc_count id_roles_csv svc_roles_csv
         name=$(yq ".servicePolicies[$i].name" "$YAML_FILE")
         type=$(yq ".servicePolicies[$i].type" "$YAML_FILE")
 
+        id_roles=()
+        id_count=$(yq ".servicePolicies[$i].identityRoles | length" "$YAML_FILE")
+        for j in $(seq 0 $((id_count - 1))); do
+            id_roles+=("$(yq ".servicePolicies[$i].identityRoles[$j]" "$YAML_FILE")")
+        done
+
+        svc_roles=()
+        svc_count=$(yq ".servicePolicies[$i].serviceRoles | length" "$YAML_FILE")
+        for j in $(seq 0 $((svc_count - 1))); do
+            svc_roles+=("$(yq ".servicePolicies[$i].serviceRoles[$j]" "$YAML_FILE")")
+        done
+
+        id_roles_csv=$(IFS=,; echo "${id_roles[*]}")
+        svc_roles_csv=$(IFS=,; echo "${svc_roles[*]}")
+
         if ! resource_exists "service-policy" "$name"; then
-            # 收集 identity roles
-            local id_roles=()
-            local id_count
-            id_count=$(yq ".servicePolicies[$i].identityRoles | length" "$YAML_FILE")
-            for j in $(seq 0 $((id_count - 1))); do
-                id_roles+=($(yq ".servicePolicies[$i].identityRoles[$j]" "$YAML_FILE"))
-            done
-
-            # 收集 service roles
-            local svc_roles=()
-            local svc_count
-            svc_count=$(yq ".servicePolicies[$i].serviceRoles | length" "$YAML_FILE")
-            for j in $(seq 0 $((svc_count - 1))); do
-                svc_roles+=($(yq ".servicePolicies[$i].serviceRoles[$j]" "$YAML_FILE"))
-            done
-
-            local id_roles_csv svc_roles_csv
-            id_roles_csv=$(IFS=,; echo "${id_roles[*]}")
-            svc_roles_csv=$(IFS=,; echo "${svc_roles[*]}")
-
             $ZITI edge create service-policy "$name" "$type" \
                 --identity-roles "$id_roles_csv" \
                 --service-roles "$svc_roles_csv" && \
                 echo "  [+] ServicePolicy '${name}' (${type}) 建立成功" || \
                 echo "  [!] ServicePolicy '${name}' 建立失敗"
         else
-            echo "  [=] ServicePolicy '${name}' 已存在"
+            $ZITI edge update service-policy "$name" \
+                --identity-roles "$id_roles_csv" \
+                --service-roles "$svc_roles_csv" >/dev/null 2>&1 && \
+                echo "  [=] ServicePolicy '${name}' 已更新" || \
+                echo "  [!] ServicePolicy '${name}' 更新失敗"
         fi
     done
 }
@@ -185,35 +203,36 @@ apply_router_policies() {
     echo "  找到 ${erp_count} 個 Edge Router Policy 定義"
 
     for i in $(seq 0 $((erp_count - 1))); do
-        local name
+        local name id_roles er_roles id_count er_count id_roles_csv er_roles_csv
         name=$(yq ".edgeRouterPolicies[$i].name" "$YAML_FILE")
 
+        id_roles=()
+        id_count=$(yq ".edgeRouterPolicies[$i].identityRoles | length" "$YAML_FILE")
+        for j in $(seq 0 $((id_count - 1))); do
+            id_roles+=("$(yq ".edgeRouterPolicies[$i].identityRoles[$j]" "$YAML_FILE")")
+        done
+
+        er_roles=()
+        er_count=$(yq ".edgeRouterPolicies[$i].edgeRouterRoles | length" "$YAML_FILE")
+        for j in $(seq 0 $((er_count - 1))); do
+            er_roles+=("$(yq ".edgeRouterPolicies[$i].edgeRouterRoles[$j]" "$YAML_FILE")")
+        done
+
+        id_roles_csv=$(IFS=,; echo "${id_roles[*]}")
+        er_roles_csv=$(IFS=,; echo "${er_roles[*]}")
+
         if ! resource_exists "edge-router-policy" "$name"; then
-            local id_roles=()
-            local id_count
-            id_count=$(yq ".edgeRouterPolicies[$i].identityRoles | length" "$YAML_FILE")
-            for j in $(seq 0 $((id_count - 1))); do
-                id_roles+=($(yq ".edgeRouterPolicies[$i].identityRoles[$j]" "$YAML_FILE"))
-            done
-
-            local er_roles=()
-            local er_count
-            er_count=$(yq ".edgeRouterPolicies[$i].edgeRouterRoles | length" "$YAML_FILE")
-            for j in $(seq 0 $((er_count - 1))); do
-                er_roles+=($(yq ".edgeRouterPolicies[$i].edgeRouterRoles[$j]" "$YAML_FILE"))
-            done
-
-            local id_roles_csv er_roles_csv
-            id_roles_csv=$(IFS=,; echo "${id_roles[*]}")
-            er_roles_csv=$(IFS=,; echo "${er_roles[*]}")
-
             $ZITI edge create edge-router-policy "$name" \
                 --identity-roles "$id_roles_csv" \
                 --edge-router-roles "$er_roles_csv" && \
                 echo "  [+] EdgeRouterPolicy '${name}' 建立成功" || \
                 echo "  [!] EdgeRouterPolicy '${name}' 建立失敗"
         else
-            echo "  [=] EdgeRouterPolicy '${name}' 已存在"
+            $ZITI edge update edge-router-policy "$name" \
+                --identity-roles "$id_roles_csv" \
+                --edge-router-roles "$er_roles_csv" >/dev/null 2>&1 && \
+                echo "  [=] EdgeRouterPolicy '${name}' 已更新" || \
+                echo "  [!] EdgeRouterPolicy '${name}' 更新失敗"
         fi
     done
 
@@ -223,35 +242,36 @@ apply_router_policies() {
     echo "  找到 ${serp_count} 個 Service Edge Router Policy 定義"
 
     for i in $(seq 0 $((serp_count - 1))); do
-        local name
+        local name svc_roles er_roles svc_count er_count svc_roles_csv er_roles_csv
         name=$(yq ".serviceEdgeRouterPolicies[$i].name" "$YAML_FILE")
 
+        svc_roles=()
+        svc_count=$(yq ".serviceEdgeRouterPolicies[$i].serviceRoles | length" "$YAML_FILE")
+        for j in $(seq 0 $((svc_count - 1))); do
+            svc_roles+=("$(yq ".serviceEdgeRouterPolicies[$i].serviceRoles[$j]" "$YAML_FILE")")
+        done
+
+        er_roles=()
+        er_count=$(yq ".serviceEdgeRouterPolicies[$i].edgeRouterRoles | length" "$YAML_FILE")
+        for j in $(seq 0 $((er_count - 1))); do
+            er_roles+=("$(yq ".serviceEdgeRouterPolicies[$i].edgeRouterRoles[$j]" "$YAML_FILE")")
+        done
+
+        svc_roles_csv=$(IFS=,; echo "${svc_roles[*]}")
+        er_roles_csv=$(IFS=,; echo "${er_roles[*]}")
+
         if ! resource_exists "service-edge-router-policy" "$name"; then
-            local svc_roles=()
-            local svc_count
-            svc_count=$(yq ".serviceEdgeRouterPolicies[$i].serviceRoles | length" "$YAML_FILE")
-            for j in $(seq 0 $((svc_count - 1))); do
-                svc_roles+=($(yq ".serviceEdgeRouterPolicies[$i].serviceRoles[$j]" "$YAML_FILE"))
-            done
-
-            local er_roles=()
-            local er_count
-            er_count=$(yq ".serviceEdgeRouterPolicies[$i].edgeRouterRoles | length" "$YAML_FILE")
-            for j in $(seq 0 $((er_count - 1))); do
-                er_roles+=($(yq ".serviceEdgeRouterPolicies[$i].edgeRouterRoles[$j]" "$YAML_FILE"))
-            done
-
-            local svc_roles_csv er_roles_csv
-            svc_roles_csv=$(IFS=,; echo "${svc_roles[*]}")
-            er_roles_csv=$(IFS=,; echo "${er_roles[*]}")
-
             $ZITI edge create service-edge-router-policy "$name" \
                 --service-roles "$svc_roles_csv" \
                 --edge-router-roles "$er_roles_csv" && \
                 echo "  [+] ServiceEdgeRouterPolicy '${name}' 建立成功" || \
                 echo "  [!] ServiceEdgeRouterPolicy '${name}' 建立失敗"
         else
-            echo "  [=] ServiceEdgeRouterPolicy '${name}' 已存在"
+            $ZITI edge update service-edge-router-policy "$name" \
+                --service-roles "$svc_roles_csv" \
+                --edge-router-roles "$er_roles_csv" >/dev/null 2>&1 && \
+                echo "  [=] ServiceEdgeRouterPolicy '${name}' 已更新" || \
+                echo "  [!] ServiceEdgeRouterPolicy '${name}' 更新失敗"
         fi
     done
 }
