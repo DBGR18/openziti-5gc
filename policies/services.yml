@@ -59,6 +59,29 @@ services:
         port: 2152
 
   # -------------------------------------------------------------------
+  # N3 下行：UPF -> gNB（GTP-U, UDP Port 2152）
+  # core-ns 攔截 UPF 發往 10.10.1.2:2152 的下行封包，經 Ziti 送到 gNB 的實際 GTP-U 監聽位址。
+  # 實測 UERANSIM gNB 綁定在 10.10.1.2:2152，而非 127.0.0.1:2152。
+  # -------------------------------------------------------------------
+  - name: n3-gtpu-dl-service
+    roleAttributes:
+      - core-services
+      - user-plane-downlink
+    configs:
+      intercept:
+        protocols:
+          - udp
+        addresses:
+          - "10.10.1.2"        # gNB 的 GTP-U 位址（UPF 下行實際目標）
+        portRanges:
+          - low: 2152
+            high: 2152
+      host:
+        protocol: udp
+        address: 10.10.1.2      # gNB 程序實際監聽位址
+        port: 2152
+
+  # -------------------------------------------------------------------
   # N4 控制面（可選）：SMF ↔ UPF（PFCP, UDP Port 8805）
   # 對應 smfcfg.yaml 的 pfcp.nodeID: 127.0.0.1 → UPF pfcp.addr: 127.0.0.8
   # -------------------------------------------------------------------

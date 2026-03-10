@@ -58,6 +58,15 @@ identities:
     enrollment:
       ott: true
 
+  # core-ns 內用於攔截下行 N3（UPF -> gNB）並送入 Ziti 的身份
+  - name: core-upf-dialer
+    type: Device
+    roleAttributes:
+      - core-side
+      - user-plane-dialer
+    enrollment:
+      ott: true
+
   # 如果 AMF 和 UPF 在同一台主機，可以合併成一個 Identity：
   # - name: core-all-in-one
   #   type: Device
