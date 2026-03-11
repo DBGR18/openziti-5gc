@@ -1,0 +1,4 @@
+github.com/free5gc/sctp v1.1.1 h1:FfoQjIwMDL+IfD3YWx/+S2nO7fFVi/5FZ11xJQ/gRi0=
+github.com/free5gc/sctp v1.1.1/go.mod h1:th0y/MUwlqBcoy9nY65VEOdoCgu3ObV1ADAicgkpLl0=
+github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
+github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
