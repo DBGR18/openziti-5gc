@@ -9,12 +9,12 @@ services:
 
   # -------------------------------------------------------------------
   # N2 控制面：gNB ↔ AMF（SCTP/NGAP, Port 38412）
-  # 方案 2：SCTP-over-TCP 封裝
+  # 方案 2：SCTP-aware gateway over Ziti UDP
   #
-  #   gNB 側: gNB(SCTP:38412) → socat(SCTP→TCP) → Tunneler intercept
-  #   核網側: Tunneler host → socat(TCP→SCTP) → AMF(SCTP:38412)
+  #   gNB 側: gNB(SCTP:38412) → n2-gateway(SCTP→UDP frame) → Tunneler intercept
+  #   核網側: Tunneler host → n2-gateway(UDP frame→SCTP) → AMF(SCTP:38412)
   #
-  # Ziti 傳輸的是 TCP，兩端的 socat 負責 SCTP↔TCP 轉換
+  # Ziti 傳輸的是 UDP datagram；gateway 會保留 PPID/stream 等 SCTP metadata
   # -------------------------------------------------------------------
   - name: n2-ngap-service
     roleAttributes:
@@ -23,16 +23,16 @@ services:
     configs:
       intercept:
         protocols:
-          - tcp                # gNB 側 socat 轉出的是 TCP
+          - udp                # gNB 側 gateway 轉出的是 UDP frame
         addresses:
-          - amf.ziti           # gNB 側 socat 連這個虛擬地址
+          - amf.ziti           # gNB 側 gateway 連這個虛擬地址
         portRanges:
           - low: 38412
             high: 38412
       host:
-        protocol: tcp
-        address: 127.0.0.1     # 核網側 socat 監聽在 localhost
-        port: 38413            # socat TCP:38413 → SCTP:127.0.0.18:38412
+        protocol: udp
+        address: 127.0.0.1     # 核網側 gateway 監聽在 localhost
+        port: 38413            # gateway UDP:38413 → SCTP:127.0.0.18:38412
 
   # -------------------------------------------------------------------
   # N3 用戶面：gNB ↔ UPF（GTP-U, UDP Port 2152）

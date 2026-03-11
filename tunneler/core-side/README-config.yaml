@@ -30,7 +30,7 @@
 # 1. 連接到 Ziti Controller，取得該 Identity 可 Bind 的 Service 列表
 # 2. 對每個 Service，向 Fabric 註冊 Terminator
 # 3. 當 Fabric 把流量路由過來時：
-#    - N2: 解密 → 送到 localhost:38413 → socat 轉 SCTP → AMF:38412
+#    - N2: 解密 → 送到 localhost:38413 (UDP) → gateway 轉 SCTP → AMF:38412
 #    - N3: 解密 → 送到 127.0.0.8:2152 (UDP) → UPF
 #    - N4: 解密 → 送到 127.0.0.8:8805 (UDP) → UPF
 #
