@@ -32,8 +32,10 @@ ADMIN_PASS    := $(shell cat .admin-password 2>/dev/null || echo "Change!Me123")
 # Ziti CLI 路徑
 ZITI          := $(BIN_DIR)/ziti
 ZET           := $(BIN_DIR)/ziti-edge-tunnel
+N2GW          := $(BIN_DIR)/n2-sctp-gateway
 
 .PHONY: all help dirs download build-from-source install-tunnel \
+	build-n2-gateway \
         pki controller-init router-init \
         start-controller start-router stop-controller stop-router \
         login apply apply-services apply-identities apply-policies \
@@ -127,6 +129,12 @@ install-tunnel: dirs
 	fi
 	$(ZET) version || true
 	@echo "✓ ziti-edge-tunnel 安裝完成"
+
+build-n2-gateway: dirs
+	@echo ">>> 編譯 N2 SCTP-aware gateway..."
+	cd $(PROJECT_DIR)/n2-gateway && go build -o $(N2GW) ./cmd/n2-sctp-gateway
+	chmod +x $(N2GW)
+	@echo "✓ N2 gateway 已編譯完成"
 
 pki:
 	@echo ">>> 生成 Root CA..."
@@ -286,26 +294,26 @@ enroll-core:
 enroll: enroll-gnb enroll-core
 	@echo "✓ 全部 Identity enroll 完成"
 
-start-tunnel-core:
+start-tunnel-core: build-n2-gateway
 	@echo ">>> 在 core-ns 內啟動 Tunneler (run-host 模式)..."
 	@echo ">>> 準備 core-side host identities ..."
 	@mkdir -p $(DATA_DIR)/core-host-identities
 	@cp -f $(PKI_DIR)/identities/core-amf-host.json $(DATA_DIR)/core-host-identities/ 2>/dev/null || true
 	@cp -f $(PKI_DIR)/identities/core-upf-host.json $(DATA_DIR)/core-host-identities/ 2>/dev/null || true
-	@echo ">>> 清理 core-ns 舊的 tunnel/socat ..."
+	@echo ">>> 清理 core-ns 舊的 tunnel/N2 gateway ..."
 	-@if [ -f $(DATA_DIR)/tunnel-core.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/tunnel-core.pid) 2>/dev/null || true; \
 		rm -f $(DATA_DIR)/tunnel-core.pid; \
 	fi
-	-@if [ -f $(DATA_DIR)/socat-core.pid ]; then \
-		sudo kill $$(cat $(DATA_DIR)/socat-core.pid) 2>/dev/null || true; \
-		rm -f $(DATA_DIR)/socat-core.pid; \
+	-@if [ -f $(DATA_DIR)/n2gw-core.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/n2gw-core.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/n2gw-core.pid; \
 	fi
 	-@if [ -f $(DATA_DIR)/tunnel-core-dial.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/tunnel-core-dial.pid) 2>/dev/null || true; \
 		rm -f $(DATA_DIR)/tunnel-core-dial.pid; \
 	fi
-	-sudo ip netns exec core-ns pkill -f "socat TCP-LISTEN:38413" 2>/dev/null || true
+	-sudo ip netns exec core-ns pkill -f "n2-sctp-gateway --mode core" 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti0 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti1 2>/dev/null || true
 	@sleep 1
@@ -327,29 +335,28 @@ start-tunnel-core:
 	@sudo ip netns exec core-ns pgrep -f "ziti-edge-tunnel run --identity $(PKI_DIR)/identities/core-upf-dialer.json" | tail -n1 > $(DATA_DIR)/tunnel-core-dial.pid || true
 	@sleep 2
 	@echo "✓ core-upf-dialer 已啟動（N3 downlink intercept）"
-	@echo ">>> 啟動 N2 socat (core-ns 內)..."
+	@echo ">>> 啟動 N2 SCTP-aware gateway (core-ns 內)..."
 	sudo ip netns exec core-ns \
-		nohup socat TCP-LISTEN:38413,bind=127.0.0.1,fork,reuseaddr \
-		SCTP:127.0.0.18:38412 \
-		> $(LOG_DIR)/socat-n2-core.log 2>&1 &
-	@sudo ip netns exec core-ns pgrep -f "socat TCP-LISTEN:38413" | tail -n1 > $(DATA_DIR)/socat-core.pid || true
-	@echo "✓ socat-core 已啟動 (TCP:38413→SCTP:AMF:38412)"
+		nohup $(N2GW) --mode core --udp-listen 127.0.0.1:38413 --amf-sctp 127.0.0.18:38412 \
+		> $(LOG_DIR)/n2gw-core.log 2>&1 &
+	@sudo ip netns exec core-ns pgrep -f "n2-sctp-gateway --mode core" | tail -n1 > $(DATA_DIR)/n2gw-core.pid || true
+	@echo "✓ N2 core gateway 已啟動 (UDP:127.0.0.1:38413→SCTP:127.0.0.18:38412)"
 
-start-tunnel-gnb:
+start-tunnel-gnb: build-n2-gateway
 	@echo ">>> 在 gnb-ns 內啟動 Tunneler (run/tproxy 模式)..."
 	@echo ">>> 設定 gnb-ns DNS 指向 Ziti DNS (100.64.0.1)..."
 	-sudo mkdir -p /etc/netns/gnb-ns
 	-echo -e "nameserver 100.64.0.1\noptions timeout:1 attempts:1" | sudo tee /etc/netns/gnb-ns/resolv.conf >/dev/null
-	@echo ">>> 清理 gnb-ns 舊的 tunnel/socat ..."
+	@echo ">>> 清理 gnb-ns 舊的 tunnel/N2 gateway ..."
 	-@if [ -f $(DATA_DIR)/tunnel-gnb.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/tunnel-gnb.pid) 2>/dev/null || true; \
 		rm -f $(DATA_DIR)/tunnel-gnb.pid; \
 	fi
-	-@if [ -f $(DATA_DIR)/socat-gnb.pid ]; then \
-		sudo kill $$(cat $(DATA_DIR)/socat-gnb.pid) 2>/dev/null || true; \
-		rm -f $(DATA_DIR)/socat-gnb.pid; \
+	-@if [ -f $(DATA_DIR)/n2gw-gnb.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/n2gw-gnb.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/n2gw-gnb.pid; \
 	fi
-	-sudo ip netns exec gnb-ns pkill -f "socat SCTP-LISTEN:38412" 2>/dev/null || true
+	-sudo ip netns exec gnb-ns pkill -f "n2-sctp-gateway --mode gnb" 2>/dev/null || true
 	-sudo ip netns exec gnb-ns ip link del ziti0 2>/dev/null || true
 	-sudo ip netns exec gnb-ns ip link del ziti1 2>/dev/null || true
 	@sleep 1
@@ -365,13 +372,12 @@ start-tunnel-gnb:
 	@echo ">>> 添加 UPF 路由（tproxy 攔截需要）..."
 	sudo ip netns exec gnb-ns \
 		ip route add 10.10.2.0/24 via 10.10.1.1 2>/dev/null || true
-	@echo ">>> 啟動 N2 socat (gnb-ns 內)..."
+	@echo ">>> 啟動 N2 SCTP-aware gateway (gnb-ns 內)..."
 	sudo ip netns exec gnb-ns \
-		nohup socat SCTP-LISTEN:38412,bind=127.0.0.1,fork,reuseaddr \
-		TCP:amf.ziti:38412 \
-		> $(LOG_DIR)/socat-n2-gnb.log 2>&1 &
-	@sudo ip netns exec gnb-ns pgrep -f "socat SCTP-LISTEN:38412" | tail -n1 > $(DATA_DIR)/socat-gnb.pid || true
-	@echo "✓ socat-gnb 已啟動 (SCTP:38412→TCP:amf.ziti:38412)"
+		nohup $(N2GW) --mode gnb --sctp-listen 127.0.0.1:38412 --udp-remote amf.ziti:38412 \
+		> $(LOG_DIR)/n2gw-gnb.log 2>&1 &
+	@sudo ip netns exec gnb-ns pgrep -f "n2-sctp-gateway --mode gnb" | tail -n1 > $(DATA_DIR)/n2gw-gnb.pid || true
+	@echo "✓ N2 gNB gateway 已啟動 (SCTP:127.0.0.1:38412→UDP:amf.ziti:38412)"
 
 start-core:
 	@echo ">>> 在 core-ns 內啟動 free5gc..."
@@ -423,6 +429,7 @@ status:
 	@echo ""
 	@echo "--- Tunneler ---"
 	@pgrep -a ziti-edge-tunnel 2>/dev/null || echo "  狀態: ✗ 未運行"
+	@pgrep -a n2-sctp-gateway 2>/dev/null || echo "  N2 gateway: ✗ 未運行"
 	@echo ""
 	@echo "--- 已註冊的服務 ---"
 	@$(ZITI) edge list services 2>/dev/null || echo "  (需先 make login)"
@@ -466,40 +473,34 @@ stop-all:
 		sudo kill $$(cat $(DATA_DIR)/tunnel-core-dial.pid) 2>/dev/null; \
 		rm -f $(DATA_DIR)/tunnel-core-dial.pid; \
 	fi
-	-@if [ -f $(DATA_DIR)/socat-gnb.pid ]; then \
-		sudo kill $$(cat $(DATA_DIR)/socat-gnb.pid) 2>/dev/null; \
-		rm -f $(DATA_DIR)/socat-gnb.pid; \
+	-@if [ -f $(DATA_DIR)/n2gw-gnb.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/n2gw-gnb.pid) 2>/dev/null; \
+		rm -f $(DATA_DIR)/n2gw-gnb.pid; \
 	fi
-	-@if [ -f $(DATA_DIR)/socat-core.pid ]; then \
-		sudo kill $$(cat $(DATA_DIR)/socat-core.pid) 2>/dev/null; \
-		rm -f $(DATA_DIR)/socat-core.pid; \
+	-@if [ -f $(DATA_DIR)/n2gw-core.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/n2gw-core.pid) 2>/dev/null; \
+		rm -f $(DATA_DIR)/n2gw-core.pid; \
 	fi
 	-$(MAKE) stop-router
 	-$(MAKE) stop-controller
 	-sudo pkill -f ziti-edge-tunnel 2>/dev/null || true
-	-sudo pkill -f "socat.*38412" 2>/dev/null || true
-	-sudo pkill -f "socat.*38413" 2>/dev/null || true
+	-sudo pkill -f n2-sctp-gateway 2>/dev/null || true
 	@echo "✓ 所有服務已停止"
-# =============================================================================
+
 resume: start-controller start-router start-core start-tunnel-core start-tunnel-gnb start-gnb start-ue
 	@echo "✓ 所有服務已恢復運行"
 
 clean: stop-all
 	@echo ">>> 清理資料..."
-	rm -rf $(DATA_DIR) $(LOG_DIR) $(PKI_DIR)/identities/*.json
-	-sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh delete 2>/dev/null || true
-	@echo "✓ 清理完成（設定檔與 binary 保留）"
-
-clean-all: clean
 	rm -rf $(PKI_DIR) $(DATA_DIR) $(LOG_DIR)
 	rm -f .admin-password
-	@echo "✓ 全部清理完成"
+	-sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh delete 2>/dev/null || true
+	@echo "✓ 清理完成"
 
-# =============================================================================
 build: dirs ns-create pki controller router apply enroll core tunneler gnb ue
 	@echo "✓ 已依序完成完整重建"
 
-clean-rebuild: clean-all build
+rebuild: clean build
 
 install: download install-tunnel build
 	@echo "✓ Binary 已準備就緒"
