@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start-gnb.sh — 在 gnb-ns 內啟動 UERANSIM gNB (+ UE)
+# start-gnb.sh — Start UERANSIM gNB (+ UE) in gnb-ns
 #
-# 前提: namespace 已建立，free5gc 已在 core-ns 內運行
+# Prerequisite: namespace created, free5gc is running in core-ns
 #
-# 用法:
-#   sudo ./scripts/start-gnb.sh start      # 啟動 gNB
-#   sudo ./scripts/start-gnb.sh start-ue   # 啟動 UE
+# Usage:
+#   sudo ./scripts/start-gnb.sh start      # Start gNB
+#   sudo ./scripts/start-gnb.sh start-ue   # Start UE
 #   sudo ./scripts/start-gnb.sh stop
 #   sudo ./scripts/start-gnb.sh status
 # =============================================================================
@@ -19,13 +19,13 @@ UERANSIM_DIR="${UERANSIM_DIR:-/home/$(logname 2>/dev/null || echo $SUDO_USER)/UE
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PID_FILE="/tmp/gnb-ns-pids"
 
-# Namespace 內 gNB 設定檔位置
+# gNB configuration path in namespace
 GNB_CONFIG="${PROJECT_DIR}/config/ueransim-gnb.yaml"
 UE_CONFIG="${PROJECT_DIR}/config/ueransim-ue.yaml"
 
 check_ns() {
     if ! ip netns list 2>/dev/null | grep -qw "$NS"; then
-        echo "[ERROR] namespace '$NS' 不存在。請先執行:"
+        echo "[ERROR] namespace '$NS' does not exist. Please run first:"
         echo "  sudo ./scripts/setup-namespaces.sh create"
         exit 1
     fi
@@ -42,20 +42,20 @@ create_configs() {
     # gNB 設定：適配 namespace 網路
     # ---------------------------------------------------------------
     if [ ! -f "$GNB_CONFIG" ]; then
-        echo ">>> 生成 gNB 設定檔..."
+        echo ">>> Generating gNB configuration file..."
         cat > "$GNB_CONFIG" << 'GNBEOF'
 # =============================================================================
-# UERANSIM gNB — 適用於 gnb-ns namespace + Ziti 保護
+# UERANSIM gNB — for gnb-ns namespace + Ziti protection
 #
-# 重要：
-#   linkIp/ngapIp/gtpIp: 使用 127.0.0.1 (gnb-ns 內的 loopback)
-#   AMF address: 連到本地 n2 gateway (127.0.0.1:38412)
-#     gateway 把 SCTP payload + metadata → UDP frame → Ziti Tunneler → Ziti Fabric
+# Important:
+#   linkIp/ngapIp/gtpIp: Use 127.0.0.1 (loopback in gnb-ns)
+#   AMF address: Connect to local n2 gateway (127.0.0.1:38412)
+#     gateway sends SCTP payload + metadata → UDP frame → Ziti Tunneler → Ziti Fabric
 #     → Core Tunneler → gateway → AMF
 #
 #   N3 GTP-U:
-#     gNB 送 UDP 到 AMF 告知的 UPF 地址 (10.10.2.2:2152)
-#     → gnb-ns 內的 Tunneler tproxy 攔截
+#     gNB sends UDP to UPF address informed by AMF (10.10.2.2:2152)
+#     → Intercepted by Tunneler tproxy in gnb-ns
 #     → Ziti Fabric → Core Tunneler → UPF
 # =============================================================================
 
@@ -65,11 +65,11 @@ nci: '0x000000010'
 idLength: 32
 tac: 1
 
-linkIp: 127.0.0.1     # gNB 內部連線（gnb-ns loopback）
-ngapIp: 127.0.0.1     # N2 本地端（gNB 側）
-gtpIp:  10.10.1.2     # N3 位址（供 UPF 下行送回 gNB）
+linkIp: 127.0.0.1     # gNB internal connection (gnb-ns loopback)
+ngapIp: 127.0.0.1     # N2 local side (gNB side)
+gtpIp:  10.10.1.2     # N3 address (for UPF downlink back to gNB)
 
-# AMF 連線 — 指向本地 n2 gateway (SCTP:38412 → UDP frame → Ziti)
+# AMF connection — pointing to local n2 gateway (SCTP:38412 → UDP frame → Ziti)
 amfConfigs:
   - address: 127.0.0.1
     port: 38412
@@ -87,9 +87,9 @@ GNBEOF
     # UE 設定
     # ---------------------------------------------------------------
     if [ ! -f "$UE_CONFIG" ]; then
-        echo ">>> 生成 UE 設定檔..."
+        echo ">>> Generating UE configuration file..."
         cat > "$UE_CONFIG" << 'UEEOF'
-# UERANSIM UE — 適用於 gnb-ns namespace
+# UERANSIM UE — for gnb-ns namespace
 supi: 'imsi-208930000000001'
 mcc: '208'
 mnc: '93'
@@ -158,7 +158,7 @@ UEEOF
 start_gnb() {
     check_ns
     create_configs
-    echo "=== 在 $NS 內啟動 UERANSIM gNB ==="
+    echo "=== 在 $NS 內Start UERANSIM gNB ==="
 
     > "$PID_FILE"
 
@@ -174,7 +174,7 @@ start_gnb() {
     # 清理舊版 veth-gnb -> 127.0.0.1 的 DNAT workaround（避免殘留規則干擾）
     ns_exec iptables -t nat -D PREROUTING -i veth-gnb -p udp -d 10.10.1.2 --dport 2152 -j DNAT --to-destination 127.0.0.1:2152 2>/dev/null || true
 
-    # 啟動 gNB
+    # Start gNB
     ns_exec "${UERANSIM_DIR}/build/nr-gnb" \
         -c "$GNB_CONFIG" \
         > "${PROJECT_DIR}/logs/gnb.log" 2>&1 &
@@ -194,14 +194,14 @@ start_gnb() {
     fi
 
     echo ""
-    echo "  啟動 UE:  sudo $0 start-ue"
+    echo "  Start UE:  sudo $0 start-ue"
     echo "  查看日誌: tail -f ${PROJECT_DIR}/logs/gnb.log"
 }
 
 start_ue() {
     check_ns
     create_configs
-    echo "=== 在 $NS 內啟動 UERANSIM UE ==="
+    echo "=== 在 $NS 內Start UERANSIM UE ==="
 
     ns_exec "${UERANSIM_DIR}/build/nr-ue" \
         -c "$UE_CONFIG" \
@@ -253,12 +253,12 @@ stop_gnb() {
         ns_exec pkill -f nr-ue 2>/dev/null || true
     fi
 
-    echo "✓ UERANSIM 已停止"
+    echo "✓ UERANSIM stopped"
 }
 
 show_status() {
     check_ns
-    echo "=== $NS 內的 UERANSIM 狀態 ==="
+    echo "=== $NS 內的 UERANSIM Status ==="
     echo ""
     echo "--- 網路介面 ---"
     ns_exec ip -br addr | sed 's/^/  /'
@@ -269,7 +269,7 @@ show_status() {
             if kill -0 "$pid" 2>/dev/null; then
                 echo "  ✓ $name (PID: $pid)"
             else
-                echo "  ✗ $name (PID: $pid) — 未運行"
+                echo "  ✗ $name (PID: $pid) — Not running"
             fi
         done < "$PID_FILE"
     else
@@ -284,7 +284,7 @@ case "$ACTION" in
     stop)     stop_gnb ;;
     status)   show_status ;;
     *)
-        echo "用法: $0 {start|start-ue|stop|status}"
+        echo "Usage: $0 {start|start-ue|stop|status}"
         exit 1
         ;;
 esac

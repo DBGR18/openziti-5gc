@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# setup-namespaces.sh — 三 Namespace 隔離拓撲
+# setup-namespaces.sh — Three Namespace Isolation Topology
 #
-# 最擬真的單機部署：gNB、Router、Core 各在獨立的 Network Namespace。
-# N2/N3 走 Ziti overlay，N6（外網出口）由 core-ns 直接接到 Host。
+# Realistic single-machine deployment: gNB, Router, and Core in separate Network Namespaces.
+# N2/N3 use Ziti overlay, N6 (External Exit) connects core-ns directly to Host.
 #
 #  ┌──────────┐         ┌──────────────┐         ┌──────────┐
 #  │  gnb-ns  │ veth    │  router-ns   │ veth    │  core-ns │
@@ -13,14 +13,14 @@
 #                       └───────┬──────┘         └──────────┘
 #                               │ veth
 #                    Host (10.10.3.2)
-#                    (管理 CLI / Internet uplink)
+#                    (Management CLI / Internet uplink)
 #
-# 關鍵隔離：
-#   gnb-ns 只能到達 router-ns (10.10.1.0/24)
-#   core-ns 只能到達 router-ns (10.10.2.0/24)
-#   gnb-ns ←✗→ core-ns    (完全隔離，必須經 Ziti)
+# Key Isolation:
+#   gnb-ns can only reach router-ns (10.10.1.0/24)
+#   core-ns can only reach router-ns (10.10.2.0/24)
+#   gnb-ns ←✗→ core-ns    (Fully isolated, must go through Ziti)
 #
-# 用法：
+# Usage:
 #   sudo ./scripts/setup-namespaces.sh create
 #   sudo ./scripts/setup-namespaces.sh delete
 #   sudo ./scripts/setup-namespaces.sh status
@@ -30,12 +30,12 @@ set -euo pipefail
 
 ACTION="${1:-status}"
 
-# Namespace 名稱
+# Namespace Names
 NS_GNB="gnb-ns"
 NS_ROUTER="router-ns"
 NS_CORE="core-ns"
 
-# === 網段定義 ===
+# === Subnet Definitions ===
 # gNB ↔ Router: 10.10.1.0/24
 GNB_IP="10.10.1.2/24"
 ROUTER_GNB_IP="10.10.1.1/24"
@@ -44,18 +44,18 @@ ROUTER_GNB_IP="10.10.1.1/24"
 ROUTER_CORE_IP="10.10.2.1/24"
 CORE_IP="10.10.2.2/24"
 
-# Router ↔ Host (管理用): 10.10.3.0/24
+# Router ↔ Host (Management): 10.10.3.0/24
 ROUTER_HOST_IP="10.10.3.1/24"
 HOST_IP="10.10.3.2/24"
 
-# Core ↔ Host (N6 / 外網出口): 10.10.4.0/24
+# Core ↔ Host (N6 / External Exit): 10.10.4.0/24
 CORE_HOST_IP="10.10.4.1/24"
 HOST_CORE_IP="10.10.4.2/24"
 
 create_namespaces() {
-    echo "=== 建立三個 Network Namespaces ==="
+    echo "=== Creating three Network Namespaces ==="
 
-    # --- 清理殘留 ---
+    # --- Cleaning up remnants ---
     for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE"; do
         if ip netns list 2>/dev/null | grep -qw "$ns"; then
             ip netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null || true
@@ -67,11 +67,11 @@ create_namespaces() {
     ip link del veth-host-core 2>/dev/null || true
     sleep 0.5
 
-    # --- 建立 Namespaces ---
+    # --- Creating Namespaces ---
     ip netns add "$NS_GNB"
     ip netns add "$NS_ROUTER"
     ip netns add "$NS_CORE"
-    echo "✓ 三個 namespace 已建立"
+    echo "✓ Three namespaces created"
 
     # --- veth pair 1: gNB ↔ Router (10.10.1.0/24) ---
     echo ">>> veth: gnb-ns ↔ router-ns..."
@@ -100,8 +100,8 @@ create_namespaces() {
     ip netns exec "$NS_ROUTER" ip addr add "$ROUTER_CORE_IP" dev veth-core-r
     ip netns exec "$NS_ROUTER" ip link set veth-core-r up
 
-    # --- veth pair 3: Router ↔ Host (10.10.3.0/24) 管理用 ---
-    echo ">>> veth: router-ns ↔ Host (管理通道)..."
+    # --- veth pair 3: Router ↔ Host (10.10.3.0/24) Management side ---
+    echo ">>> veth: router-ns ↔ Host (Management channel)..."
     ip link add veth-host type veth peer name veth-host-r
     ip link set veth-host-r netns "$NS_ROUTER"
 
@@ -111,8 +111,8 @@ create_namespaces() {
     ip netns exec "$NS_ROUTER" ip addr add "$ROUTER_HOST_IP" dev veth-host-r
     ip netns exec "$NS_ROUTER" ip link set veth-host-r up
 
-    # --- veth pair 4: Core ↔ Host (10.10.4.0/24) N6 用 ---
-    echo ">>> veth: core-ns ↔ Host (N6 出口)..."
+    # --- veth pair 4: Core ↔ Host (10.10.4.0/24) for N6 ---
+    echo ">>> veth: core-ns ↔ Host (N6 exit)..."
     ip link add veth-host-core type veth peer name veth-core-host
     ip link set veth-core-host netns "$NS_CORE"
 
@@ -122,28 +122,28 @@ create_namespaces() {
     ip netns exec "$NS_CORE" ip addr add "$CORE_HOST_IP" dev veth-core-host
     ip netns exec "$NS_CORE" ip link set veth-core-host up
 
-    # --- 路由設定 ---
-    echo ">>> 設定路由..."
+    # --- Route settings ---
+    echo ">>> Setting routes..."
 
-    # gNB 預設閘道 → Router (只能到 10.10.1.0/24)
+    # gNB default gateway -> Router (limited to 10.10.1.0/24)
     ip netns exec "$NS_GNB" ip route add default via 10.10.1.1
 
-    # Core 預設閘道 → Host（N6 出口直連）
+    # Core default gateway -> Host (N6 exit direct connect)
     ip netns exec "$NS_CORE" ip route add default via 10.10.4.2 dev veth-core-host
 
-    # Host 到各 namespace 的路由
+    # Host routes to each namespace
     ip route add 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
     ip route add 10.10.2.0/24 via 10.10.3.1 2>/dev/null || true
-    # UE IP pool 回程路由（N6 回來後直接回 core-ns）
+    # UE IP pool return route (back to core-ns after N6)
     ip route add 10.60.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
     ip route add 10.61.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
 
-    # Router: 不開啟 IP 轉發！
-    # gnb-ns 和 core-ns 之間不能直接通訊
-    # 只有 Router ↔ gnb-ns 和 Router ↔ core-ns 可達
+    # Router: IP forwarding not enabled！
+    # gnb-ns and core-ns cannot communicate directly
+    # Only Router ↔ gnb-ns and Router ↔ core-ns reachable
     ip netns exec "$NS_ROUTER" sysctl -w net.ipv4.ip_forward=0 > /dev/null
 
-    # 但 Router 需要轉發 Host(10.10.3.0/24) ↔ gnb/core 的管理流量
+    # But Router needs to forward Host(10.10.3.0/24) ↔ gnb/core management traffic
     # 所以我們用 iptables 精確控制：只轉發管理流量，不轉發 gnb↔core
     ip netns exec "$NS_ROUTER" sysctl -w net.ipv4.ip_forward=1 > /dev/null
 
@@ -152,7 +152,7 @@ create_namespaces() {
         -s 10.10.1.0/24 -d 10.10.2.0/24 -j DROP
     ip netns exec "$NS_ROUTER" iptables -A FORWARD \
         -s 10.10.2.0/24 -d 10.10.1.0/24 -j DROP
-    # 允許 Host(10.10.3.0/24) ↔ 兩端的管理流量
+    # 允許 Host(10.10.3.0/24) ↔ 兩端management traffic
     ip netns exec "$NS_ROUTER" iptables -A FORWARD \
         -s 10.10.3.0/24 -j ACCEPT
     ip netns exec "$NS_ROUTER" iptables -A FORWARD \
@@ -199,10 +199,10 @@ create_namespaces() {
     ping -c 1 -W 2 10.10.2.2 > /dev/null 2>&1 && echo "✓" || echo "✗"
 
     echo -n "  gnb-ns → core-ns (10.10.2.2): "
-    ip netns exec "$NS_GNB" ping -c 1 -W 2 10.10.2.2 > /dev/null 2>&1 && echo "✗ (被 DROP，正確！)" || echo "✗ (不可達，正確！)"
+    ip netns exec "$NS_GNB" ping -c 1 -W 2 10.10.2.2 > /dev/null 2>&1 && echo "✗ (被 DROP，正確！)" || echo "✗ (不reachable，正確！)"
 
     echo ""
-    echo "✓ 三個 Network Namespace 建立完成！"
+    echo "✓ 三個 Network Namespace Creatingcomplete！"
     echo ""
     echo "=== 拓撲 ==="
     echo ""
@@ -221,7 +221,7 @@ create_namespaces() {
 }
 
 delete_namespaces() {
-    echo "=== 刪除所有 Network Namespaces ==="
+    echo "=== Deleting all Network Namespaces ==="
 
     for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE"; do
         if ip netns list 2>/dev/null | grep -qw "$ns"; then
@@ -248,11 +248,11 @@ delete_namespaces() {
     # 清理 DNS
     rm -rf /etc/netns/"$NS_GNB" /etc/netns/"$NS_ROUTER" /etc/netns/"$NS_CORE" 2>/dev/null || true
 
-    echo "✓ 清理完成"
+    echo "✓ 清理complete"
 }
 
 show_status() {
-    echo "=== Network Namespace 狀態 ==="
+    echo "=== Network Namespace Status ==="
     echo ""
 
     for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE"; do

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
-# apply.sh — 讀取 YAML 設定檔，透過 ziti edge CLI 套用到 Controller
+# apply.sh — Read YAML config and apply to Controller via ziti edge CLI
 #
-# 用法:
+# Usage:
 #   ./apply.sh services      policies/services.yml
 #   ./apply.sh identities    policies/identities.yml
 #   ./apply.sh policies       policies/service-policies.yml
 #   ./apply.sh router-policies policies/edge-router-policies.yml
 #
-# 依賴: yq (https://github.com/mikefarah/yq), jq, ziti CLI
+# Dependencies: yq (https://github.com/mikefarah/yq), jq, ziti CLI
 # =============================================================================
 
 set -euo pipefail
 
-# 找 ziti binary（優先用專案目錄內的）
+# Find ziti binary (prioritize project directory)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ZITI="${PROJECT_DIR}/bin/ziti"
@@ -21,13 +21,13 @@ if [ ! -x "$ZITI" ]; then
     ZITI="$(which ziti 2>/dev/null || true)"
 fi
 if [ -z "$ZITI" ] || [ ! -x "$ZITI" ]; then
-    echo "ERROR: 找不到 ziti CLI，請先執行 make download" >&2
+    echo "ERROR: ziti CLI not found, please run make download first" >&2
     exit 1
 fi
 
-# 確保 yq 可用
+# Ensure yq is available
 if ! command -v yq &>/dev/null; then
-    echo ">>> 安裝 yq..."
+    echo ">>> Installing yq..."
     sudo wget -qO /usr/local/bin/yq \
         "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64"
     sudo chmod +x /usr/local/bin/yq
@@ -36,7 +36,7 @@ fi
 ACTION="$1"
 YAML_FILE="$2"
 
-# 檢查資源是否已存在
+# Check if resource already exists
 resource_exists() {
     local type="$1" name="$2"
     local resource_name
@@ -59,46 +59,46 @@ resource_exists() {
 }
 
 # =============================================================================
-# 套用 Services
+# Applying Services
 # =============================================================================
 apply_services() {
     local count
     count=$(yq '.services | length' "$YAML_FILE")
-    echo "  找到 ${count} 個 Service 定義"
+    echo "  Found ${count} Service definitions"
 
     for i in $(seq 0 $((count - 1))); do
         local name roles
         name=$(yq ".services[$i].name" "$YAML_FILE")
         roles=$(yq ".services[$i].roleAttributes | join(\",\")" "$YAML_FILE")
 
-        # 建立 intercept config
+        # Create intercept config
         local intercept_data
         intercept_data=$(yq -o=json ".services[$i].configs.intercept" "$YAML_FILE")
         local intercept_cfg_name="${name}-intercept-config"
 
         if ! resource_exists "config" "$intercept_cfg_name"; then
             $ZITI edge create config "$intercept_cfg_name" intercept.v1 "$intercept_data" && \
-                echo "  [+] Config '${intercept_cfg_name}' 建立成功" || \
-                echo "  [!] Config '${intercept_cfg_name}' 建立失敗"
+                echo "  [+] Config '${intercept_cfg_name}' created successfully" || \
+                echo "  [!] Config '${intercept_cfg_name}' creation failed"
         else
             $ZITI edge update config "$intercept_cfg_name" --data "$intercept_data" >/dev/null 2>&1 && \
-                echo "  [=] Config '${intercept_cfg_name}' 已更新" || \
-                echo "  [!] Config '${intercept_cfg_name}' 更新失敗"
+                echo "  [=] Config '${intercept_cfg_name}' updated" || \
+                echo "  [!] Config '${intercept_cfg_name}' update failed"
         fi
 
-        # 建立 host config
+        # Create host config
         local host_data
         host_data=$(yq -o=json ".services[$i].configs.host" "$YAML_FILE")
         local host_cfg_name="${name}-host-config"
 
         if ! resource_exists "config" "$host_cfg_name"; then
             $ZITI edge create config "$host_cfg_name" host.v1 "$host_data" && \
-                echo "  [+] Config '${host_cfg_name}' 建立成功" || \
-                echo "  [!] Config '${host_cfg_name}' 建立失敗"
+                echo "  [+] Config '${host_cfg_name}' created successfully" || \
+                echo "  [!] Config '${host_cfg_name}' creation failed"
         else
             $ZITI edge update config "$host_cfg_name" --data "$host_data" >/dev/null 2>&1 && \
-                echo "  [=] Config '${host_cfg_name}' 已更新" || \
-                echo "  [!] Config '${host_cfg_name}' 更新失敗"
+                echo "  [=] Config '${host_cfg_name}' updated" || \
+                echo "  [!] Config '${host_cfg_name}' update failed"
         fi
 
         # 建立 service
@@ -106,25 +106,25 @@ apply_services() {
             $ZITI edge create service "$name" \
                 --configs "${intercept_cfg_name},${host_cfg_name}" \
                 -a "$roles" && \
-                echo "  [+] Service '${name}' 建立成功" || \
-                echo "  [!] Service '${name}' 建立失敗"
+                echo "  [+] Service '${name}' created successfully" || \
+                echo "  [!] Service '${name}' creation failed"
         else
             $ZITI edge update service "$name" \
                 --configs "${intercept_cfg_name},${host_cfg_name}" \
                 -a "$roles" >/dev/null 2>&1 && \
-                echo "  [=] Service '${name}' 已更新（configs/roles 已同步）" || \
-                echo "  [!] Service '${name}' 更新失敗"
+                echo "  [=] Service '${name}' updated（configs/roles 已同步）" || \
+                echo "  [!] Service '${name}' update failed"
         fi
     done
 }
 
 # =============================================================================
-# 套用 Identities
+# Applying Identities
 # =============================================================================
 apply_identities() {
     local count
     count=$(yq '.identities | length' "$YAML_FILE")
-    echo "  找到 ${count} 個 Identity 定義"
+    echo "  Found ${count} Identity definitions"
 
     local jwt_dir="${PROJECT_DIR}/pki/identities"
     mkdir -p "$jwt_dir"
@@ -139,12 +139,12 @@ apply_identities() {
             $ZITI edge create identity "$name" \
                 -a "$roles" \
                 -o "${jwt_dir}/${name}.jwt" && \
-                echo "  [+] Identity '${name}' 建立成功 → JWT: ${jwt_dir}/${name}.jwt" || \
-                echo "  [!] Identity '${name}' 建立失敗"
+                echo "  [+] Identity '${name}' created successfully → JWT: ${jwt_dir}/${name}.jwt" || \
+                echo "  [!] Identity '${name}' creation failed"
         else
             # 更新角色標籤
             $ZITI edge update identity "$name" -a "$roles" 2>/dev/null
-            echo "  [=] Identity '${name}' 已存在（角色已更新: ${roles}）"
+            echo "  [=] Identity '${name}' 已存在（角色updated: ${roles}）"
         fi
     done
 }
@@ -181,14 +181,14 @@ apply_service_policies() {
             $ZITI edge create service-policy "$name" "$type" \
                 --identity-roles "$id_roles_csv" \
                 --service-roles "$svc_roles_csv" && \
-                echo "  [+] ServicePolicy '${name}' (${type}) 建立成功" || \
-                echo "  [!] ServicePolicy '${name}' 建立失敗"
+                echo "  [+] ServicePolicy '${name}' (${type}) created successfully" || \
+                echo "  [!] ServicePolicy '${name}' creation failed"
         else
             $ZITI edge update service-policy "$name" \
                 --identity-roles "$id_roles_csv" \
                 --service-roles "$svc_roles_csv" >/dev/null 2>&1 && \
-                echo "  [=] ServicePolicy '${name}' 已更新" || \
-                echo "  [!] ServicePolicy '${name}' 更新失敗"
+                echo "  [=] ServicePolicy '${name}' updated" || \
+                echo "  [!] ServicePolicy '${name}' update failed"
         fi
     done
 }
@@ -225,14 +225,14 @@ apply_router_policies() {
             $ZITI edge create edge-router-policy "$name" \
                 --identity-roles "$id_roles_csv" \
                 --edge-router-roles "$er_roles_csv" && \
-                echo "  [+] EdgeRouterPolicy '${name}' 建立成功" || \
-                echo "  [!] EdgeRouterPolicy '${name}' 建立失敗"
+                echo "  [+] EdgeRouterPolicy '${name}' created successfully" || \
+                echo "  [!] EdgeRouterPolicy '${name}' creation failed"
         else
             $ZITI edge update edge-router-policy "$name" \
                 --identity-roles "$id_roles_csv" \
                 --edge-router-roles "$er_roles_csv" >/dev/null 2>&1 && \
-                echo "  [=] EdgeRouterPolicy '${name}' 已更新" || \
-                echo "  [!] EdgeRouterPolicy '${name}' 更新失敗"
+                echo "  [=] EdgeRouterPolicy '${name}' updated" || \
+                echo "  [!] EdgeRouterPolicy '${name}' update failed"
         fi
     done
 
@@ -264,14 +264,14 @@ apply_router_policies() {
             $ZITI edge create service-edge-router-policy "$name" \
                 --service-roles "$svc_roles_csv" \
                 --edge-router-roles "$er_roles_csv" && \
-                echo "  [+] ServiceEdgeRouterPolicy '${name}' 建立成功" || \
-                echo "  [!] ServiceEdgeRouterPolicy '${name}' 建立失敗"
+                echo "  [+] ServiceEdgeRouterPolicy '${name}' created successfully" || \
+                echo "  [!] ServiceEdgeRouterPolicy '${name}' creation failed"
         else
             $ZITI edge update service-edge-router-policy "$name" \
                 --service-roles "$svc_roles_csv" \
                 --edge-router-roles "$er_roles_csv" >/dev/null 2>&1 && \
-                echo "  [=] ServiceEdgeRouterPolicy '${name}' 已更新" || \
-                echo "  [!] ServiceEdgeRouterPolicy '${name}' 更新失敗"
+                echo "  [=] ServiceEdgeRouterPolicy '${name}' updated" || \
+                echo "  [!] ServiceEdgeRouterPolicy '${name}' update failed"
         fi
     done
 }

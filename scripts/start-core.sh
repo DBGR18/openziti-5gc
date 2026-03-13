@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start-core.sh — 在 core-ns 內啟動 free5gc 全部 NF
+# start-core.sh — Start all free5gc NFs in core-ns
 #
-# 前提: namespace 已建立 (setup-namespaces.sh create)
+# Prerequisite: namespace created (setup-namespaces.sh create)
 #
-# 用法:
+# Usage:
 #   sudo ./scripts/start-core.sh start
 #   sudo ./scripts/start-core.sh stop
 #   sudo ./scripts/start-core.sh status
@@ -18,22 +18,22 @@ FREE5GC_DIR="${FREE5GC_DIR:-/home/$(logname 2>/dev/null || echo $SUDO_USER)/free
 LOG_DIR="${FREE5GC_DIR}/log/ns-$(date +%Y%m%d_%H%M%S)"
 PID_FILE="/tmp/core-ns-pids"
 
-# 檢查 namespace 是否存在
+# Check if namespace exists
 check_ns() {
     if ! ip netns list 2>/dev/null | grep -qw "$NS"; then
-        echo "[ERROR] namespace '$NS' 不存在。請先執行:"
+        echo "[ERROR] namespace '$NS' does not exist. Please run first:"
         echo "  sudo ./scripts/setup-namespaces.sh create"
         exit 1
     fi
 }
 
-# 在 namespace 內執行命令
+# Execute command within namespace
 ns_exec() {
     ip netns exec "$NS" "$@"
 }
 
 seed_default_subscriber() {
-        # 只在資料不存在時建立，避免覆寫使用者既有設定
+        # Create only if data does not exist, to avoid overwriting user settings
         ns_exec mongosh free5gc --quiet --eval '
 const ueId = "imsi-208930000000001";
 const plmn = "20893";
@@ -245,9 +245,9 @@ cleanup_residual_nf() {
 
 start_core() {
     check_ns
-    echo "=== 在 $NS 內啟動 free5gc ==="
+    echo "=== 在 $NS 內Starting free5gc ==="
 
-    # 啟動前清掉任何殘留程序，避免埠衝突
+    # Starting前清掉任何殘留程序，避免埠衝突
     cleanup_residual_nf
 
     # 確認 lo 介面的 127.0.0.0/8 可用（Linux 預設行為，但確認一下）
@@ -257,9 +257,9 @@ start_core() {
     > "$PID_FILE"
 
     # ---------------------------------------------------------------
-    # 1. 啟動 MongoDB（在 core-ns 內）
+    # 1. Starting MongoDB（在 core-ns 內）
     # ---------------------------------------------------------------
-    echo ">>> 啟動 MongoDB..."
+    echo ">>> Starting MongoDB..."
     # MongoDB 的 data 目錄
     MONGO_DATA="/tmp/core-ns-mongo"
     mkdir -p "$MONGO_DATA"
@@ -291,9 +291,9 @@ start_core() {
     seed_default_subscriber > /dev/null 2>&1 || true
 
     # ---------------------------------------------------------------
-    # 2. 啟動 UPF（需要 sudo，因為要建 GTP tunnel）
+    # 2. Starting UPF（需要 sudo，因為要建 GTP tunnel）
     # ---------------------------------------------------------------
-    echo ">>> 啟動 UPF..."
+    echo ">>> Starting UPF..."
     ns_exec "${FREE5GC_DIR}/bin/upf" \
         -c "${FREE5GC_DIR}/config/upfcfg.yaml" \
         -l "$LOG_DIR/free5gc.log" &
@@ -309,13 +309,13 @@ start_core() {
     ns_exec iptables -t nat -D POSTROUTING -p udp -d 10.10.1.2 --sport 2152 --dport 2152 -j SNAT --to-source 10.10.2.2 2>/dev/null || true
 
     # ---------------------------------------------------------------
-    # 3. 啟動其他 NF（不需 sudo）
+    # 3. Starting其他 NF（不需 sudo）
     # ---------------------------------------------------------------
     export GIN_MODE=release
     cd "${FREE5GC_DIR}" || exit 1
     NF_LIST="nrf amf smf udr pcf udm nssf ausf chf nef"
     for nf in $NF_LIST; do
-        echo ">>> 啟動 ${nf}..."
+        echo ">>> Starting ${nf}..."
         ns_exec "${FREE5GC_DIR}/bin/${nf}" \
             -c "${FREE5GC_DIR}/config/${nf}cfg.yaml" \
             -l "$LOG_DIR/free5gc.log" &
@@ -326,7 +326,7 @@ start_core() {
     done
 
     echo ""
-    echo "✓ free5gc 所有 NF 已在 $NS 內啟動"
+    echo "✓ free5gc 所有 NF 已在 $NS 內Starting"
     echo "  日誌: $LOG_DIR/"
     echo "  PID 列表: $PID_FILE"
     echo ""
@@ -358,7 +358,7 @@ stop_core() {
 
 show_status() {
     check_ns
-    echo "=== $NS 內的 free5gc 狀態 ==="
+    echo "=== $NS 內的 free5gc Status ==="
     echo ""
     echo "--- 網路介面 ---"
     ns_exec ip -br addr | sed 's/^/  /'
@@ -373,7 +373,7 @@ show_status() {
             if kill -0 "$pid" 2>/dev/null; then
                 echo "  ✓ $name (PID: $pid)"
             else
-                echo "  ✗ $name (PID: $pid) — 未運行"
+                echo "  ✗ $name (PID: $pid) — Not running"
             fi
         done < "$PID_FILE"
     else
@@ -387,7 +387,7 @@ case "$ACTION" in
     stop)   stop_core ;;
     status) show_status ;;
     *)
-        echo "用法: $0 {start|stop|status}"
+        echo "Usage: $0 {start|stop|status}"
         exit 1
         ;;
 esac
