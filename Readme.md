@@ -1,9 +1,6 @@
 # openziti-5gc
 
 Zero-trust overlay for a 5G core network — protects the N2 / N3 / N4 interfaces of [free5gc](https://free5gc.org/) with [OpenZiti](https://openziti.io/) mTLS tunnels, while keeping gNB and core completely isolated at the network level.
-
-> **Current N2 implementation:** SCTP frames are carried over Ziti UDP via a custom `n2-sctp-gateway`, which preserves SCTP metadata (PPID, stream ID). Any earlier references to `socat` SCTP↔TCP conversion describe a superseded design.
-
 ---
 
 ## Architecture
