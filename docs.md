@@ -693,7 +693,7 @@ sudo ip netns exec core-ns tcpdump -i any -n 'udp port 2152'
 
 ```bash
 # Direct ping from gnb-ns to core-ns should fail
-sudo ip netns exec gnb-ns ping -i veth-gnb -c 3 10.10.2.2
+sudo ip netns exec gnb-ns ping -I veth-gnb -c 3 10.10.2.2
 
 # router-ns DROP counter should increment
 sudo ip netns exec router-ns iptables -L FORWARD -n -v | grep DROP
