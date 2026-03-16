@@ -1,9 +1,9 @@
-# OpenZiti 5GC — Experiment Log (Mar 16, 2026)
+# OpenZiti 5GC — Performance Experiment
 
 This document records experiment steps and results for comparing:
 
-1) **Baseline (no OpenZiti, underlay N2/N3): UE → gNB → UPF → DN**
-2) **Via-Ziti (N3 over OpenZiti): UE → gNB → Ziti → UPF → DN**
+1) **Baseline (no OpenZiti, underlay N2/N3): UE → gNB → CN → DN**
+2) **Via-Ziti (N3 over OpenZiti): UE → gNB → Ziti → CN → DN**
 
 ## 1. Topology
 
@@ -83,7 +83,7 @@ Quick check:
 sudo ip netns exec dn-ns ss -ltnup | grep ':5201'
 ```
 
-## 6. Tests (UE → UPF → DN)
+## 6. Tests (UE → CN → DN)
 
 ### 6.1 Baseline (no OpenZiti, underlay N2/N3)
 
@@ -163,7 +163,7 @@ sudo ip netns exec gnb-ns iperf3 -c 10.10.5.2 -t 10 -P 4 -B "$UEIP"
 Sanity check (optional):
 - In via-Ziti mode, you should observe **no** `UDP/2152` on `core-ns` underlay `veth-core` (because N3 is carried over Ziti).
 
-### 6.3 Latency & jitter collection (UE → UPF → DN)
+### 6.3 Latency & jitter collection (UE → CN → DN)
 
 Run these commands in **both** baseline and via-Ziti modes (after UE is attached and `uesimtun0` exists). They generate the same artifacts used in section 7.2.
 
@@ -211,9 +211,9 @@ Notes:
 
 ## 7) Measured Results
 
-### 7.1 TCP throughput (10s, `-P 4`) — UE → UPF → DN
+### 7.1 TCP throughput (10s, `-P 4`) — UE → CN → DN
 
-Bench artifacts:
+Example logs:
 - Baseline (no Ziti): `logs/bench-upf-20260316-164729-upf-baseline/`
 - Via-Ziti (N3 over Ziti): `logs/bench-upf-20260316-164936-upf-via-ziti/`
 
@@ -221,9 +221,9 @@ Results:
 - **Baseline (no OpenZiti):** sender **~149.9 Mbits/sec**, receiver **~148.1 Mbits/sec**
 - **Via-Ziti (N3 over OpenZiti):** sender **~56.1 Mbits/sec**, receiver **~54.4 Mbits/sec**
 
-### 7.2 Latency & jitter — UE → UPF → DN
+### 7.2 Latency & jitter — UE → CN → DN
 
-Bench artifacts:
+Example logs:
 - Baseline: `logs/bench-upf-20260316-165520-baseline-latjit/`
 - Via-Ziti: `logs/bench-upf-20260316-165702-via-ziti-latjit/`
 
