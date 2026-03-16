@@ -316,6 +316,8 @@ start-tunnel-core: build-n2-gateway
 	-sudo ip netns exec core-ns pkill -f "n2-sctp-gateway --mode core" 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti0 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti1 2>/dev/null || true
+	@echo ">>> Pinning core->router transport path via veth-core..."
+	-sudo ip netns exec core-ns ip route replace 10.10.3.1/32 via 10.10.2.1 dev veth-core 2>/dev/null || true
 	@sleep 1
 	sudo ip netns exec core-ns \
 		nohup $(ZET) run-host \

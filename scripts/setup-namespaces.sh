@@ -130,6 +130,9 @@ create_namespaces() {
 
     # Core default gateway -> Host (N6 exit direct connect)
     ip netns exec "$NS_CORE" ip route add default via 10.10.4.2 dev veth-core-host
+    # Pin router management endpoint to the dedicated core<->router underlay link.
+    # This keeps core-side overlay transport off the N6 host path.
+    ip netns exec "$NS_CORE" ip route replace 10.10.3.1/32 via 10.10.2.1 dev veth-core
 
     # Host routes to each namespace
     ip route add 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
