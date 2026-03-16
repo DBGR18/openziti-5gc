@@ -34,6 +34,7 @@ ACTION="${1:-status}"
 NS_GNB="gnb-ns"
 NS_ROUTER="router-ns"
 NS_CORE="core-ns"
+NS_DN="dn-ns"
 
 # === Subnet Definitions ===
 # gNB ↔ Router: 10.10.1.0/24
@@ -52,11 +53,15 @@ HOST_IP="10.10.3.2/24"
 CORE_HOST_IP="10.10.4.1/24"
 HOST_CORE_IP="10.10.4.2/24"
 
+# Router ↔ DN (Optional): 10.10.5.0/24
+ROUTER_DN_IP="10.10.5.1/24"
+DN_IP="10.10.5.2/24"
+
 create_namespaces() {
     echo "=== Creating three Network Namespaces ==="
 
     # --- Cleaning up remnants ---
-    for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE"; do
+    for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE" "$NS_DN"; do
         if ip netns list 2>/dev/null | grep -qw "$ns"; then
             ip netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null || true
             sleep 0.3
@@ -65,6 +70,7 @@ create_namespaces() {
     done
     ip link del veth-host 2>/dev/null || true
     ip link del veth-host-core 2>/dev/null || true
+    ip link del veth-dn 2>/dev/null || true
     sleep 0.5
 
     # --- Creating Namespaces ---
@@ -131,6 +137,12 @@ create_namespaces() {
     # Core default gateway -> Host (N6 exit direct connect)
     ip netns exec "$NS_CORE" ip route add default via 10.10.4.2 dev veth-core-host
 
+    # Core must be able to route back to the gNB subnet via router-ns.
+    # This is required for the *baseline underlay N2* path where the core-side
+    # n2-sctp-gateway sends UDP replies to 10.10.1.2.
+    # (router-ns still enforces isolation via FORWARD DROP rules by default.)
+    ip netns exec "$NS_CORE" ip route replace 10.10.1.0/24 via 10.10.2.1 dev veth-core
+
     # Host routes to each namespace
     ip route add 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
     ip route add 10.10.2.0/24 via 10.10.3.1 2>/dev/null || true
@@ -158,6 +170,11 @@ create_namespaces() {
     ip netns exec "$NS_ROUTER" iptables -A FORWARD \
         -d 10.10.3.0/24 -j ACCEPT
 
+    # UE pools live behind core-ns (UPF). Add router-side return routes so
+    # DN (10.10.5.0/24) replies to UE IPs go back to core-ns directly.
+    ip netns exec "$NS_ROUTER" ip route add 10.60.0.0/16 via 10.10.2.2 2>/dev/null || true
+    ip netns exec "$NS_ROUTER" ip route add 10.61.0.0/16 via 10.10.2.2 2>/dev/null || true
+
     # --- DNS ---
     for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE"; do
         mkdir -p /etc/netns/"$ns"
@@ -167,6 +184,23 @@ create_namespaces() {
     # --- NAT: 讓各 namespace 能上網（下載、enroll 等需要） ---
     # 從 router-ns 到 Host 的 NAT（讓 gnb-ns/router-ns 管理流量可上網）
     sysctl -w net.ipv4.ip_forward=1 > /dev/null
+
+    # Host FORWARD is often DROP (e.g. Docker). Allow core-ns management + egress via veth-host-core.
+    # - management/controller: 10.10.4.0/24 <-> 10.10.3.0/24
+    # - internet egress: core-ns (10.10.4.0/24) and UE pools (10.60/16, 10.61/16)
+    iptables -C FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -C FORWARD -s 10.10.3.0/24 -d 10.10.4.0/24 -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -s 10.10.3.0/24 -d 10.10.4.0/24 -j ACCEPT
+    iptables -C FORWARD -s 10.10.4.0/24 -d 10.10.3.0/24 -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -s 10.10.4.0/24 -d 10.10.3.0/24 -j ACCEPT
+    iptables -C FORWARD -i veth-host-core -s 10.10.4.0/24 -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -i veth-host-core -s 10.10.4.0/24 -j ACCEPT
+    iptables -C FORWARD -i veth-host-core -s 10.60.0.0/16 -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -i veth-host-core -s 10.60.0.0/16 -j ACCEPT
+    iptables -C FORWARD -i veth-host-core -s 10.61.0.0/16 -j ACCEPT 2>/dev/null || \
+        iptables -I FORWARD 1 -i veth-host-core -s 10.61.0.0/16 -j ACCEPT
+
     iptables -t nat -A POSTROUTING -s 10.10.3.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     # core-ns 出口流量（透過 N6 直連 Host）
     iptables -t nat -A POSTROUTING -s 10.10.4.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
@@ -220,10 +254,71 @@ create_namespaces() {
     echo ""
 }
 
+create_dn_namespace() {
+    echo "=== Creating DN namespace (dn-ns) ==="
+
+    if ! ip netns list 2>/dev/null | grep -qw "$NS_ROUTER"; then
+        echo "[ERROR] router-ns does not exist. Run: sudo $0 create" >&2
+        exit 1
+    fi
+
+    if ip netns list 2>/dev/null | grep -qw "$NS_DN"; then
+        ip netns pids "$NS_DN" 2>/dev/null | xargs -r kill 2>/dev/null || true
+        sleep 0.3
+        ip netns del "$NS_DN" 2>/dev/null || true
+    fi
+
+    ip link del veth-dn 2>/dev/null || true
+    ip netns exec "$NS_ROUTER" ip link del veth-dn-r 2>/dev/null || true
+
+    ip netns add "$NS_DN"
+    ip netns exec "$NS_DN" ip link set lo up
+
+    echo ">>> veth: dn-ns ↔ router-ns..."
+    ip link add veth-dn type veth peer name veth-dn-r
+    ip link set veth-dn netns "$NS_DN"
+    ip link set veth-dn-r netns "$NS_ROUTER"
+
+    ip netns exec "$NS_DN" ip addr add "$DN_IP" dev veth-dn
+    ip netns exec "$NS_DN" ip link set veth-dn up
+
+    ip netns exec "$NS_ROUTER" ip addr add "$ROUTER_DN_IP" dev veth-dn-r
+    ip netns exec "$NS_ROUTER" ip link set veth-dn-r up
+
+    ip netns exec "$NS_DN" ip route add default via 10.10.5.1
+
+    # Host needs a route to DN subnet via router-ns management link
+    ip route add 10.10.5.0/24 via 10.10.3.1 2>/dev/null || true
+
+    mkdir -p /etc/netns/"$NS_DN"
+    cp /etc/resolv.conf /etc/netns/"$NS_DN"/resolv.conf
+
+    echo "✓ dn-ns created"
+}
+
+delete_dn_namespace() {
+    echo "=== Deleting DN namespace (dn-ns) ==="
+
+    if ip netns list 2>/dev/null | grep -qw "$NS_DN"; then
+        echo ">>> 清理 $NS_DN..."
+        ip netns pids "$NS_DN" 2>/dev/null | xargs -r kill 2>/dev/null || true
+        sleep 0.5
+        ip netns del "$NS_DN" 2>/dev/null || true
+    fi
+
+    ip link del veth-dn 2>/dev/null || true
+
+    # Remove Host route to DN subnet
+    ip route del 10.10.5.0/24 via 10.10.3.1 2>/dev/null || true
+
+    rm -rf /etc/netns/"$NS_DN" 2>/dev/null || true
+    echo "✓ dn-ns deleted"
+}
+
 delete_namespaces() {
     echo "=== Deleting all Network Namespaces ==="
 
-    for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE"; do
+    for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE" "$NS_DN"; do
         if ip netns list 2>/dev/null | grep -qw "$ns"; then
             echo ">>> 清理 $ns..."
             ip netns pids "$ns" 2>/dev/null | xargs -r kill 2>/dev/null || true
@@ -234,19 +329,28 @@ delete_namespaces() {
 
     ip link del veth-host 2>/dev/null || true
     ip link del veth-host-core 2>/dev/null || true
+    ip link del veth-dn 2>/dev/null || true
 
     # 清理路由與 NAT
     ip route del 10.10.1.0/24 via 10.10.3.1 2>/dev/null || true
     ip route del 10.10.2.0/24 via 10.10.3.1 2>/dev/null || true
+    ip route del 10.10.5.0/24 via 10.10.3.1 2>/dev/null || true
     ip route del 10.60.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
     ip route del 10.61.0.0/16 via 10.10.4.1 dev veth-host-core 2>/dev/null || true
+
+    # 清理 Host FORWARD allow rules (added for core-ns management + egress)
+    iptables -D FORWARD -s 10.10.3.0/24 -d 10.10.4.0/24 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -s 10.10.4.0/24 -d 10.10.3.0/24 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -i veth-host-core -s 10.10.4.0/24 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -i veth-host-core -s 10.60.0.0/16 -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -i veth-host-core -s 10.61.0.0/16 -j ACCEPT 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.10.3.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.10.4.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.10.2.0/24 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
     iptables -t nat -D POSTROUTING -s 10.60.0.0/16 ! -d 10.10.0.0/16 -j MASQUERADE 2>/dev/null || true
 
     # 清理 DNS
-    rm -rf /etc/netns/"$NS_GNB" /etc/netns/"$NS_ROUTER" /etc/netns/"$NS_CORE" 2>/dev/null || true
+    rm -rf /etc/netns/"$NS_GNB" /etc/netns/"$NS_ROUTER" /etc/netns/"$NS_CORE" /etc/netns/"$NS_DN" 2>/dev/null || true
 
     echo "✓ 清理complete"
 }
@@ -255,7 +359,7 @@ show_status() {
     echo "=== Network Namespace Status ==="
     echo ""
 
-    for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE"; do
+    for ns in "$NS_GNB" "$NS_ROUTER" "$NS_CORE" "$NS_DN"; do
         if ip netns list 2>/dev/null | grep -qw "$ns"; then
             echo "--- $ns: 存在 ✓ ---"
             echo "  介面:"
@@ -287,9 +391,11 @@ show_status() {
 case "$ACTION" in
     create)  create_namespaces ;;
     delete|destroy|clean) delete_namespaces ;;
+    create-dn) create_dn_namespace ;;
+    delete-dn) delete_dn_namespace ;;
     status|show) show_status ;;
     *)
-        echo "用法: $0 {create|delete|status}"
+        echo "用法: $0 {create|delete|status|create-dn|delete-dn}"
         exit 1
         ;;
 esac

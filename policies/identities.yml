@@ -67,6 +67,18 @@ identities:
     enrollment:
       ott: true
 
+  # ===================================================================
+  # DN 側（Data Network 端）— 用於 iperf3 測試
+  # ===================================================================
+
+  - name: dn-iperf-host
+    type: Device
+    roleAttributes:
+      - dn-side
+      - dn-iperf-host
+    enrollment:
+      ott: true
+
   # 如果 AMF 和 UPF 在同一台主機，可以合併成一個 Identity：
   # - name: core-all-in-one
   #   type: Device
