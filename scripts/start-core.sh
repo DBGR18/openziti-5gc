@@ -17,6 +17,7 @@ NS="core-ns"
 FREE5GC_DIR="${FREE5GC_DIR:-/home/$(logname 2>/dev/null || echo $SUDO_USER)/free5gc}"
 LOG_DIR="${FREE5GC_DIR}/log/ns-$(date +%Y%m%d_%H%M%S)"
 PID_FILE="/tmp/core-ns-pids"
+RUNTIME_CFG_DIR="/tmp/core-ns-free5gc-config"
 
 # Check if namespace exists
 check_ns() {
@@ -30,6 +31,50 @@ check_ns() {
 # Execute command within namespace
 ns_exec() {
     ip netns exec "$NS" "$@"
+}
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || {
+        echo "[ERROR] missing required command: $1"
+        exit 1
+    }
+}
+
+prepare_runtime_configs() {
+    require_cmd yq
+
+    local core_n3_ip n6_if
+    core_n3_ip="$(ns_exec ip -4 -o addr show dev veth-core | awk '{print $4}' | cut -d/ -f1 | head -1)"
+    n6_if="$(ns_exec ip route show default | awk '/default/ {for(i=1;i<=NF;i++){if($i=="dev"){print $(i+1); exit}}}')"
+
+    if [[ -z "$core_n3_ip" ]]; then
+        echo "[ERROR] failed to detect core-ns N3 IP on veth-core"
+        exit 1
+    fi
+    if [[ -z "$n6_if" ]]; then
+        echo "[ERROR] failed to detect core-ns default egress interface"
+        exit 1
+    fi
+
+    rm -rf "$RUNTIME_CFG_DIR"
+    mkdir -p "$RUNTIME_CFG_DIR"
+    cp "${FREE5GC_DIR}/config/"*.yaml "$RUNTIME_CFG_DIR/"
+
+    export CORE_N3_IP="$core_n3_ip"
+    export CORE_N6_IF="$n6_if"
+
+    # Keep SBI/PFCP loopback topology inside core-ns, but advertise reachable N3 IP to gNB side.
+    yq -i '.configuration.userplaneInformation.upNodes.UPF.interfaces[0].endpoints = [strenv(CORE_N3_IP)]' "$RUNTIME_CFG_DIR/smfcfg.yaml"
+
+    # UPF binds GTP-U on core-ns underlay interface (veth-core).
+    yq -i '.gtpu.ifList[0].addr = strenv(CORE_N3_IP)' "$RUNTIME_CFG_DIR/upfcfg.yaml"
+
+    # Optional but useful: keep natifname aligned with current N6 egress interface.
+    yq -i '.dnnList[].natifname = strenv(CORE_N6_IF)' "$RUNTIME_CFG_DIR/upfcfg.yaml"
+
+    echo "  Runtime config dir: $RUNTIME_CFG_DIR"
+    echo "  Detected core-ns N3 IP: $core_n3_ip"
+    echo "  Detected core-ns N6 IF: $n6_if"
 }
 
 seed_default_subscriber() {
@@ -253,6 +298,9 @@ start_core() {
     # 確認 lo 介面的 127.0.0.0/8 可用（Linux 預設行為，但確認一下）
     ns_exec ip link set lo up
 
+    echo ">>> Preparing runtime configs for namespace IPs..."
+    prepare_runtime_configs
+
     mkdir -p "$LOG_DIR"
     > "$PID_FILE"
 
@@ -295,7 +343,7 @@ start_core() {
     # ---------------------------------------------------------------
     echo ">>> Starting UPF..."
     ns_exec "${FREE5GC_DIR}/bin/upf" \
-        -c "${FREE5GC_DIR}/config/upfcfg.yaml" \
+        -c "${RUNTIME_CFG_DIR}/upfcfg.yaml" \
         -l "$LOG_DIR/free5gc.log" &
     UPF_PID=$!
     echo "upf:$UPF_PID" >> "$PID_FILE"
@@ -317,7 +365,7 @@ start_core() {
     for nf in $NF_LIST; do
         echo ">>> Starting ${nf}..."
         ns_exec "${FREE5GC_DIR}/bin/${nf}" \
-            -c "${FREE5GC_DIR}/config/${nf}cfg.yaml" \
+            -c "${RUNTIME_CFG_DIR}/${nf}cfg.yaml" \
             -l "$LOG_DIR/free5gc.log" &
         NF_PID=$!
         echo "${nf}:${NF_PID}" >> "$PID_FILE"
