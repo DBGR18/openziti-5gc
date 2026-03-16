@@ -190,10 +190,10 @@ controller-init:
 start-controller:
 	@echo ">>> Starting Controller in router-ns..."
 	sudo ip netns exec router-ns nohup $(ZITI) controller run $(CTRL_CFG) > $(LOG_DIR)/controller.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/controller.pid
+	@sudo ip netns exec router-ns pgrep -f "$(ZITI) controller run $(CTRL_CFG)" | tail -n1 > $(DATA_DIR)/controller.pid || true
 	@echo ">>> Waiting for Controller to be ready..."
 	@timeout 15 bash -c 'until sudo ip netns exec router-ns nc -z $(CTRL_HOST) $(CTRL_MGMT_PORT); do sleep 1; done' || (echo "Startup timeout" && exit 1)
-	@echo "✓ Controller started"
+	@echo "✓ Controller started (PID: $$(cat $(DATA_DIR)/controller.pid 2>/dev/null || echo unknown))"
 
 stop-controller:
 	@if [ -f $(DATA_DIR)/controller.pid ]; then \
@@ -222,9 +222,9 @@ start-router:
 	sudo ip netns exec router-ns \
 		nohup $(ZITI) router run $(ROUTER_CFG) \
 		> $(LOG_DIR)/router.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/router.pid
+	@sudo ip netns exec router-ns pgrep -f "$(ZITI) router run $(ROUTER_CFG)" | tail -n1 > $(DATA_DIR)/router.pid || true
 	@sleep 3
-	@echo "✓ Router started (PID: $$(cat $(DATA_DIR)/router.pid))"
+	@echo "✓ Router started (PID: $$(cat $(DATA_DIR)/router.pid 2>/dev/null || echo unknown))"
 
 stop-router:
 	@if [ -f $(DATA_DIR)/router.pid ]; then \
@@ -414,22 +414,35 @@ status:
 	@echo "=== OpenZiti 5GC Status ==="
 	@echo ""
 	@echo "--- Controller ---"
-	@if [ -f $(DATA_DIR)/controller.pid ] && kill -0 $$(cat $(DATA_DIR)/controller.pid) 2>/dev/null; then \
-		echo "  Status: ✓ Running (PID: $$(cat $(DATA_DIR)/controller.pid))"; \
+	@CTRL_PID=$$(sudo ip netns exec router-ns pgrep -f "$(ZITI) controller run $(CTRL_CFG)" | tail -n1); \
+	if [ -n "$$CTRL_PID" ]; then \
+		echo $$CTRL_PID > $(DATA_DIR)/controller.pid; \
+		echo "  Status: ✓ Running (PID: $$CTRL_PID)"; \
 	else \
 		echo "  Status: ✗ Not running"; \
 	fi
 	@echo ""
 	@echo "--- Router ---"
-	@if [ -f $(DATA_DIR)/router.pid ] && kill -0 $$(cat $(DATA_DIR)/router.pid) 2>/dev/null; then \
-		echo "  Status: ✓ Running (PID: $$(cat $(DATA_DIR)/router.pid))"; \
+	@ROUTER_PID=$$(sudo ip netns exec router-ns pgrep -f "$(ZITI) router run $(ROUTER_CFG)" | tail -n1); \
+	if [ -n "$$ROUTER_PID" ]; then \
+		echo $$ROUTER_PID > $(DATA_DIR)/router.pid; \
+		echo "  Status: ✓ Running (PID: $$ROUTER_PID)"; \
 	else \
 		echo "  Status: ✗ Not running"; \
 	fi
 	@echo ""
 	@echo "--- Tunneler ---"
-	@pgrep -a ziti-edge-tunnel 2>/dev/null || echo "  Status: ✗ Not running"
-	@pgrep -a n2-sctp-gateway 2>/dev/null || echo "  N2 gateway: ✗ Not running"
+	@echo "  Ziti edge tunnel (core-ns):"
+	@{ \
+		sudo pgrep -a -f "^$(ZET) run-host --identity-dir $(DATA_DIR)/core-host-identities/"; \
+		sudo pgrep -a -f "^$(ZET) run --identity $(PKI_DIR)/identities/core-upf-dialer.json"; \
+	} 2>/dev/null || echo "    ✗ Not running"
+	@echo "  Ziti edge tunnel (gnb-ns):"
+	@sudo pgrep -a -f "^$(ZET) run --identity $(PKI_DIR)/identities/gnb-01.json" 2>/dev/null || echo "    ✗ Not running"
+	@echo "  N2 gateway (core-ns):"
+	@sudo pgrep -a -f "^$(N2GW) --mode core --udp-listen" 2>/dev/null || echo "    ✗ Not running"
+	@echo "  N2 gateway (gnb-ns):"
+	@sudo pgrep -a -f "^$(N2GW) --mode gnb --sctp-listen" 2>/dev/null || echo "    ✗ Not running"
 	@echo ""
 	@echo "--- Registered Services ---"
 	@$(ZITI) edge list services 2>/dev/null || echo "  (need to run make login first)"
