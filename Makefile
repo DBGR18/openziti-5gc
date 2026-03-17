@@ -26,6 +26,8 @@ CTRL_MGMT_PORT := 1280
 CTRL_CTRL_PORT := 6262
 ROUTER_HOST   := 10.10.3.1
 ROUTER_EDGE_PORT := 3022
+ZITI_UNDERLAY_TABLE ?= 100
+ZITI_UNDERLAY_RULE_PREF ?= 100
 ADMIN_USER    := admin
 ADMIN_PASS    := $(shell cat .admin-password 2>/dev/null || echo "Change!Me123")
 
@@ -39,13 +41,14 @@ N2GW          := $(BIN_DIR)/n2-sctp-gateway
         pki controller-init router-init \
         start-controller start-router stop-controller stop-router \
         login apply apply-services apply-identities apply-policies \
-        enroll-gnb enroll-core start-tunnel-gnb start-tunnel-core \
-        status clean systemd-install \
-        ns-create ns-delete ns-status \
+	enroll-gnb enroll-core enroll-dn start-tunnel-gnb start-tunnel-core \
+	start-tunnel-dn stop-tunnel-dn start-iperf-dn stop-iperf-dn dn \
+	status clean systemd-install \
+	ns-create ns-delete ns-status dn-create dn-delete dn-status \
         start-core stop-core start-gnb stop-gnb \
 	deploy stop-all verify verify-active \
 	controller router enroll core tunneler gnb ue \
-	rebuild clean-rebuild
+	rebuild
 
 # =============================================================================
 # Instructions
@@ -57,15 +60,18 @@ help:
 	@echo "  Mandatory Commands:"
 	@echo "    make dirs             Create directories"
 	@echo "    sudo make ns-create   Create namespaces"
+	@echo "    sudo make dn-create   Create DN namespace (dn-ns)"
 	@echo "    make pki              Generate PKI"
 	@echo "    make controller       Initialize and start Controller"
 	@echo "    make router           Register and start Router"
 	@echo "    make apply            Apply services/identities/policies"
 	@echo "    make enroll           Enroll all Identities"
+	@echo "    make enroll-dn        Enroll DN identity (dn-iperf-host)"
 	@echo "    sudo make core        Start free5gc"
 	@echo "    sudo make tunneler    Start core/gnb Tunnelers"
 	@echo "    sudo make gnb         Start gNB"
 	@echo "    sudo make ue          Start UE"
+	@echo "    sudo make dn          Start DN tunneler + iperf3 server"
 	@echo ""
 	@echo "  One-click Workflow:"
 	@echo "    sudo make rebuild     Clean-all followed by complete rebuild"
@@ -189,11 +195,11 @@ controller-init:
 
 start-controller:
 	@echo ">>> Starting Controller in router-ns..."
-	sudo ip netns exec router-ns nohup $(ZITI) controller run $(CTRL_CFG) > $(LOG_DIR)/controller.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/controller.pid
+	sudo ip netns exec router-ns \
+		bash -lc 'nohup $(ZITI) controller run $(CTRL_CFG) > $(LOG_DIR)/controller.log 2>&1 & echo $$! > $(DATA_DIR)/controller.pid'
 	@echo ">>> Waiting for Controller to be ready..."
 	@timeout 15 bash -c 'until sudo ip netns exec router-ns nc -z $(CTRL_HOST) $(CTRL_MGMT_PORT); do sleep 1; done' || (echo "Startup timeout" && exit 1)
-	@echo "✓ Controller started"
+	@echo "✓ Controller started (PID: $$(cat $(DATA_DIR)/controller.pid))"
 
 stop-controller:
 	@if [ -f $(DATA_DIR)/controller.pid ]; then \
@@ -220,9 +226,7 @@ router-init: login
 start-router:
 	@echo ">>> Starting Router in router-ns..."
 	sudo ip netns exec router-ns \
-		nohup $(ZITI) router run $(ROUTER_CFG) \
-		> $(LOG_DIR)/router.log 2>&1 &
-	@echo $$! > $(DATA_DIR)/router.pid
+		bash -lc 'nohup $(ZITI) router run $(ROUTER_CFG) > $(LOG_DIR)/router.log 2>&1 & echo $$! > $(DATA_DIR)/router.pid'
 	@sleep 3
 	@echo "✓ Router started (PID: $$(cat $(DATA_DIR)/router.pid))"
 
@@ -291,7 +295,22 @@ enroll-core:
 	done
 	@echo "✓ Core Identity enrollment complete"
 
-enroll: enroll-gnb enroll-core
+enroll-dn:
+	@for jwt in $(PKI_DIR)/identities/dn-*.jwt; do \
+		name=$$(basename $$jwt .jwt); \
+		json="$(PKI_DIR)/identities/$$name.json"; \
+		if [ ! -f $$json ] || [ $$jwt -nt $$json ]; then \
+			echo ">>> Enrolling $$name ..."; \
+			rm -f $$json; \
+			$(ZET) enroll --jwt $$jwt \
+				--identity $$json; \
+		else \
+			echo "[skip] $$name already enrolled"; \
+		fi \
+	done
+	@echo "✓ DN Identity enrollment complete"
+
+enroll: enroll-gnb enroll-core enroll-dn
 	@echo "✓ All Identities enrollment complete"
 
 start-tunnel-core: build-n2-gateway
@@ -313,33 +332,30 @@ start-tunnel-core: build-n2-gateway
 		sudo kill $$(cat $(DATA_DIR)/tunnel-core-dial.pid) 2>/dev/null || true; \
 		rm -f $(DATA_DIR)/tunnel-core-dial.pid; \
 	fi
-	-sudo ip netns exec core-ns pkill -f "n2-sctp-gateway --mode core" 2>/dev/null || true
+	-sudo ip netns exec core-ns pkill -f "[n]2-sctp-gateway --mode core" 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti0 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti1 2>/dev/null || true
 	@sleep 1
 	sudo ip netns exec core-ns \
-		nohup $(ZET) run-host \
-		--identity-dir $(DATA_DIR)/core-host-identities/ \
-		--verbose 2 \
-		> $(LOG_DIR)/tunnel-core.log 2>&1 &
-	@sudo ip netns exec core-ns pgrep -f "ziti-edge-tunnel run-host" | tail -n1 > $(DATA_DIR)/tunnel-core.pid || true
+		bash -lc 'nohup $(ZET) run-host \
+			--identity-dir $(DATA_DIR)/core-host-identities/ \
+			--verbose 2 \
+			> $(LOG_DIR)/tunnel-core.log 2>&1 & echo $$! > $(DATA_DIR)/tunnel-core.pid'
 	@sleep 2
 	@echo "✓ Core Tunneler started in core-ns"
 	@echo ">>> Starting core-upf-dialer (run mode, for N3 downlink interception)..."
 	sudo ip netns exec core-ns \
-		nohup $(ZET) run \
-		--identity $(PKI_DIR)/identities/core-upf-dialer.json \
-		--dns-ip-range "100.64.0.0/10" \
-		--verbose 2 \
-		> $(LOG_DIR)/tunnel-core-dial.log 2>&1 &
-	@sudo ip netns exec core-ns pgrep -f "ziti-edge-tunnel run --identity $(PKI_DIR)/identities/core-upf-dialer.json" | tail -n1 > $(DATA_DIR)/tunnel-core-dial.pid || true
+		bash -lc 'nohup $(ZET) run \
+			--identity $(PKI_DIR)/identities/core-upf-dialer.json \
+			--dns-ip-range "100.64.0.0/10" \
+			--verbose 2 \
+			> $(LOG_DIR)/tunnel-core-dial.log 2>&1 & echo $$! > $(DATA_DIR)/tunnel-core-dial.pid'
 	@sleep 2
 	@echo "✓ core-upf-dialer started (N3 downlink intercept)"
 	@echo ">>> Starting N2 SCTP-aware gateway (in core-ns)..."
 	sudo ip netns exec core-ns \
-		nohup $(N2GW) --mode core --udp-listen 127.0.0.1:38413 --amf-sctp 127.0.0.18:38412 \
-		> $(LOG_DIR)/n2gw-core.log 2>&1 &
-	@sudo ip netns exec core-ns pgrep -f "n2-sctp-gateway --mode core" | tail -n1 > $(DATA_DIR)/n2gw-core.pid || true
+		bash -lc 'nohup $(N2GW) --mode core --udp-listen 127.0.0.1:38413 --amf-sctp 127.0.0.18:38412 \
+			> $(LOG_DIR)/n2gw-core.log 2>&1 & echo $$! > $(DATA_DIR)/n2gw-core.pid'
 	@echo "✓ N2 core gateway started (UDP:127.0.0.1:38413→SCTP:127.0.0.18:38412)"
 
 start-tunnel-gnb: build-n2-gateway
@@ -356,17 +372,34 @@ start-tunnel-gnb: build-n2-gateway
 		sudo kill $$(cat $(DATA_DIR)/n2gw-gnb.pid) 2>/dev/null || true; \
 		rm -f $(DATA_DIR)/n2gw-gnb.pid; \
 	fi
-	-sudo ip netns exec gnb-ns pkill -f "n2-sctp-gateway --mode gnb" 2>/dev/null || true
+	-sudo ip netns exec gnb-ns pkill -f "[n]2-sctp-gateway --mode gnb" 2>/dev/null || true
 	-sudo ip netns exec gnb-ns ip link del ziti0 2>/dev/null || true
 	-sudo ip netns exec gnb-ns ip link del ziti1 2>/dev/null || true
 	@sleep 1
+	@echo ">>> Pinning controller/router underlay to veth-gnb (avoid uesimtun0 hijack)..."
+	@# Some components inject a host route to 10.10.3.1 via uesimtun0 in the main table.
+	@# Use a high-priority 'to' rule + dedicated table to force 10.10.3.1 over veth-gnb.
+	sudo ip netns exec gnb-ns sh -lc '\
+		GNB_VETH_IP=$$(ip -o -4 addr show dev veth-gnb | awk "{print \$$4}" | cut -d/ -f1 | head -n1); \
+		ip route del $(CTRL_HOST) dev uesimtun0 2>/dev/null || true; \
+		ip rule del pref $(ZITI_UNDERLAY_RULE_PREF) 2>/dev/null || true; \
+		ip rule add pref $(ZITI_UNDERLAY_RULE_PREF) to $(CTRL_HOST)/32 lookup $(ZITI_UNDERLAY_TABLE); \
+		ip route replace 10.10.1.0/24 dev veth-gnb scope link src $$GNB_VETH_IP table $(ZITI_UNDERLAY_TABLE); \
+		ip route replace $(CTRL_HOST)/32 via 10.10.1.1 dev veth-gnb table $(ZITI_UNDERLAY_TABLE)'
+	@# Re-apply after a short delay in case rules/routes get disturbed
 	sudo ip netns exec gnb-ns \
-		nohup $(ZET) run \
-		--identity $(PKI_DIR)/identities/gnb-01.json \
-		--dns-ip-range "100.64.0.0/10" \
-		--verbose 2 \
-		> $(LOG_DIR)/tunnel-gnb.log 2>&1 &
-	@sudo ip netns exec gnb-ns pgrep -f "ziti-edge-tunnel run --identity" | tail -n1 > $(DATA_DIR)/tunnel-gnb.pid || true
+		bash -lc 'nohup sh -c "sleep 25; \
+			GNB_VETH_IP=$$(ip -o -4 addr show dev veth-gnb | awk \"{print \\\$4}\" | cut -d/ -f1 | head -n1); \
+			ip rule del pref $(ZITI_UNDERLAY_RULE_PREF) 2>/dev/null || true; \
+			ip rule add pref $(ZITI_UNDERLAY_RULE_PREF) to $(CTRL_HOST)/32 lookup $(ZITI_UNDERLAY_TABLE); \
+			ip route replace 10.10.1.0/24 dev veth-gnb scope link src $$GNB_VETH_IP table $(ZITI_UNDERLAY_TABLE); \
+			ip route replace $(CTRL_HOST)/32 via 10.10.1.1 dev veth-gnb table $(ZITI_UNDERLAY_TABLE)" >/dev/null 2>&1 &'
+	sudo ip netns exec gnb-ns \
+		bash -lc 'nohup $(ZET) run \
+			--identity $(PKI_DIR)/identities/gnb-01.json \
+			--dns-ip-range "100.64.0.0/10" \
+			--verbose 2 \
+			> $(LOG_DIR)/tunnel-gnb.log 2>&1 & echo $$! > $(DATA_DIR)/tunnel-gnb.pid'
 	@sleep 3
 	@echo "✓ gNB Tunneler started in gnb-ns"
 	@echo ">>> Adding UPF route (required for tproxy interception)..."
@@ -374,10 +407,53 @@ start-tunnel-gnb: build-n2-gateway
 		ip route add 10.10.2.0/24 via 10.10.1.1 2>/dev/null || true
 	@echo ">>> Starting N2 SCTP-aware gateway (in gnb-ns)..."
 	sudo ip netns exec gnb-ns \
-		nohup $(N2GW) --mode gnb --sctp-listen 127.0.0.1:38412 --udp-remote amf.ziti:38412 \
-		> $(LOG_DIR)/n2gw-gnb.log 2>&1 &
-	@sudo ip netns exec gnb-ns pgrep -f "n2-sctp-gateway --mode gnb" | tail -n1 > $(DATA_DIR)/n2gw-gnb.pid || true
+		bash -lc 'nohup $(N2GW) --mode gnb --sctp-listen 127.0.0.1:38412 --udp-remote amf.ziti:38412 \
+			> $(LOG_DIR)/n2gw-gnb.log 2>&1 & echo $$! > $(DATA_DIR)/n2gw-gnb.pid'
 	@echo "✓ N2 gNB gateway started (SCTP:127.0.0.1:38412→UDP:amf.ziti:38412)"
+
+start-tunnel-dn:
+	@echo ">>> Starting DN Tunneler in dn-ns (run-host mode)..."
+	@echo ">>> Cleaning up old DN tunneler..."
+	-@if [ -f $(DATA_DIR)/tunnel-dn.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/tunnel-dn.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/tunnel-dn.pid; \
+	fi
+	-sudo ip netns exec dn-ns ip link del ziti0 2>/dev/null || true
+	-sudo ip netns exec dn-ns ip link del ziti1 2>/dev/null || true
+	@sleep 1
+	sudo ip netns exec dn-ns \
+		bash -lc 'nohup $(ZET) run-host \
+			--identity-dir $(PKI_DIR)/identities/ \
+			--verbose 2 \
+			> $(LOG_DIR)/tunnel-dn.log 2>&1 & echo $$! > $(DATA_DIR)/tunnel-dn.pid'
+	@sleep 2
+	@echo "✓ DN Tunneler started in dn-ns"
+
+stop-tunnel-dn:
+	-@if [ -f $(DATA_DIR)/tunnel-dn.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/tunnel-dn.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/tunnel-dn.pid; \
+	fi
+
+start-iperf-dn:
+	@echo ">>> Starting iperf3 server in dn-ns..."
+	-@if [ -f $(DATA_DIR)/iperf3-dn.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/iperf3-dn.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/iperf3-dn.pid; \
+	fi
+	sudo ip netns exec dn-ns \
+		bash -lc 'nohup iperf3 -s -B 10.10.5.2 -p 5201 \
+			> $(LOG_DIR)/iperf3-dn.log 2>&1 & echo $$! > $(DATA_DIR)/iperf3-dn.pid'
+	@echo "✓ iperf3 server started in dn-ns (10.10.5.2:5201)"
+
+stop-iperf-dn:
+	-@if [ -f $(DATA_DIR)/iperf3-dn.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/iperf3-dn.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/iperf3-dn.pid; \
+	fi
+
+dn: dn-create start-tunnel-dn start-iperf-dn
+	@echo "✓ DN workflow complete"
 
 start-core:
 	@echo ">>> Start free5gc in core-ns..."
@@ -449,6 +525,17 @@ ns-delete:
 ns-status:
 	sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh status
 
+dn-create:
+	@echo ">>> Creating DN namespace (dn-ns)..."
+	sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh create-dn
+
+dn-delete:
+	@echo ">>> Deleting DN namespace (dn-ns)..."
+	sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh delete-dn
+
+dn-status:
+	sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh status
+
 verify:
 	@echo ">>> Executing OpenZiti Passive verification..."
 	sudo bash $(SCRIPTS_DIR)/verify-openziti.sh
@@ -461,6 +548,14 @@ stop-all:
 	@echo ">>> Stop all services..."
 	-sudo bash $(SCRIPTS_DIR)/start-gnb.sh stop 2>/dev/null || true
 	-sudo bash $(SCRIPTS_DIR)/start-core.sh stop 2>/dev/null || true
+	-@if [ -f $(DATA_DIR)/iperf3-dn.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/iperf3-dn.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/iperf3-dn.pid; \
+	fi
+	-@if [ -f $(DATA_DIR)/tunnel-dn.pid ]; then \
+		sudo kill $$(cat $(DATA_DIR)/tunnel-dn.pid) 2>/dev/null || true; \
+		rm -f $(DATA_DIR)/tunnel-dn.pid; \
+	fi
 	-@if [ -f $(DATA_DIR)/tunnel-gnb.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/tunnel-gnb.pid) 2>/dev/null; \
 		rm -f $(DATA_DIR)/tunnel-gnb.pid; \
@@ -483,9 +578,6 @@ stop-all:
 	fi
 	-$(MAKE) stop-router
 	-$(MAKE) stop-controller
-	-sudo pkill -f ziti-edge-tunnel 2>/dev/null || true
-	-sudo pkill -f n2-sctp-gateway 2>/dev/null || true
-	@echo "✓ All services stopped"
 
 resume: start-controller start-router start-core start-tunnel-core start-tunnel-gnb start-gnb start-ue
 	@echo "✓ All services resumed"

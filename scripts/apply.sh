@@ -54,8 +54,8 @@ resource_exists() {
             ;;
     esac
 
-    $ZITI edge list "$resource_name" --output-json 2>/dev/null \
-        | jq -e --arg target "$name" '(.data // []) | map(.name) | index($target) != null' >/dev/null 2>&1
+    $ZITI edge list "$resource_name" "name = \"${name}\" limit 1" --output-json 2>/dev/null \
+        | jq -e '(.data // []) | length > 0' >/dev/null 2>&1
 }
 
 # =============================================================================

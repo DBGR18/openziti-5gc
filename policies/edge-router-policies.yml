@@ -21,6 +21,13 @@ edgeRouterPolicies:
     edgeRouterRoles:
       - "#all"
 
+  # DN 測試節點可使用所有 Router
+  - name: dn-use-all-routers
+    identityRoles:
+      - "#dn-side"
+    edgeRouterRoles:
+      - "#all"
+
   # 進階：依區域限制可用的 Router
   # - name: north-gnb-north-router
   #   identityRoles:
