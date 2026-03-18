@@ -239,7 +239,7 @@ Because the Controller and Router are accessed from multiple namespaces, their c
 
 ```bash
 make pki
-# Produces: pki/ca/certs/, pki/ca/keys/, pki/ca/cas/
+# Produces: pki/ca/certs/, pki/ca/keys/, pki/ca/crls/
 ```
 
 Identity credentials (JSON files used by `ziti-edge-tunnel`) are generated separately during the enroll phase and stored under `pki/identities/`.
@@ -257,7 +257,7 @@ db: data/ctrl.db
 identity:
   cert:        pki/ca/certs/ctrl-client.cert
   key:         pki/ca/keys/ctrl-client.key
-  ca:          pki/ca/cas/ca.cert
+  ca:          pki/ca/certs/ca.cert
   server_cert: pki/ca/certs/ctrl-server.chain.pem
   server_key:  pki/ca/keys/ctrl-server.key
 
@@ -273,7 +273,7 @@ edge:
       key:  pki/ca/keys/ctrl-intermediate.key
   api:
     listener: 0.0.0.0:1280
-    advertise: 10.10.3.1:1280
+    address: 10.10.3.1:1280
 ```
 
 The Controller runs inside **router-ns**. The Makefile launches it with `sudo ip netns exec router-ns`.
@@ -294,7 +294,7 @@ listeners:
   - binding: edge
     address: tls:0.0.0.0:3022
     options:
-      advertise: 10.10.1.1:3022    # gnb-ns connects via this IP
+      advertise: 10.10.3.1:3022    # gnb/core tunnelers connect via this advertised endpoint
       maxConnections: 32768
 
 edge:
@@ -322,7 +322,7 @@ Defined in `policies/services.yml`:
 | `n2-ngap-service` | N2 NGAP | `amf.ziti:38412` UDP | UDP (SCTP metadata preserved by n2-gateway) | `127.0.0.1:38413` UDP |
 | `n3-gtpu-service` | N3 GTP-U uplink | `10.10.2.2:2152` UDP | UDP | `10.10.2.2:2152` UDP |
 | `n3-gtpu-dl-service` | N3 GTP-U downlink | `10.10.1.2:2152` UDP | UDP | `10.10.1.2:2152` UDP |
-| `n4-pfcp-service` | N4 PFCP | `upf-n4.ziti:8805` UDP | UDP | `127.0.0.8:8805` UDP |
+| `n4-pfcp-service` | N4 PFCP | `10.10.2.2:8805` UDP | UDP | `127.0.0.8:8805` UDP |
 
 The `roleAttributes` on each service (e.g., `control-plane`, `user-plane`) allow policies to reference groups of services without listing them by name.
 
@@ -531,7 +531,7 @@ sudo make ns-status
 #   gnb-ns   10.10.1.2/24  ←→  router-ns 10.10.1.1/24
 #   core-ns  10.10.2.2/24  ←→  router-ns 10.10.2.1/24
 #   Host     10.10.3.2/24  ←→  router-ns 10.10.3.1/24
-#   gnb-ns → core-ns: unreachable ✓
+#   gnb-ns ↔ core-ns direct forwarding is blocked by router-ns DROP rules ✓
 ```
 
 ### Phase 3 — Generate PKI
@@ -774,7 +774,7 @@ The three-namespace topology maps directly to a real multi-machine deployment. R
 ### Required Configuration Changes
 
 1. **`Makefile`** — update `CTRL_HOST` and `ROUTER_HOST` to the Controller VM's public IP
-2. **`ctrl-config.yaml`** — update `advertiseAddress` and `advertise` under `edge.api`
+2. **`ctrl-config.yaml`** — update `advertiseAddress` and `address` under `edge.api`
 3. **`router-config.yaml`** — update `ctrl.endpoint` and the `advertise` address under `listeners`
 4. **PKI** — run `make pki` with `--ip` SANs that include the real VM IPs
 5. **Network Namespaces** — not needed; each host is naturally isolated
