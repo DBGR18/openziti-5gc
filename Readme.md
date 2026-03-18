@@ -90,9 +90,9 @@ sudo make ue
 | `sudo make ue` | Start UERANSIM UE in gnb-ns |
 | `make status` | Show running state of all components |
 | `sudo make verify` | Passive verification (packet capture checks) |
+| `sudo make verify-active` | Active verification (ping + packet capture checks) |
 | `sudo make stop-all` | Stop all services |
-| `make clean` | Remove runtime data (keep binaries & config) |
-| `make clean-all` | Remove everything including PKI |
+| `make clean` | Stop all services, remove pki/data/logs/.admin-password, and delete namespaces |
 
 ---
 
@@ -116,7 +116,6 @@ openziti-5gc/
 │   ├── apply.sh                 # Push YAML policies to controller
 │   ├── start-core.sh            # Start free5gc in core-ns
 │   └── start-gnb.sh             # Start UERANSIM in gnb-ns
-└── systemd/                     # systemd unit files for each component
 ```
 
 ---

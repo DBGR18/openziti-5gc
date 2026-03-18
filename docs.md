@@ -632,7 +632,7 @@ amfConfigs:
 ### One-Shot Deployment
 
 ```bash
-sudo make rebuild   # clean-all → full rebuild from scratch
+sudo make rebuild   # clean + full rebuild from scratch
 sudo make resume    # restart all services on an already-provisioned environment
 ```
 
@@ -755,8 +755,8 @@ wireshark /tmp/core-lo.pcap &
 ```bash
 make stop-all          # stop all managed processes
 sudo make ns-delete    # remove all namespaces
-make clean             # delete data/, logs/, enrolled identity JSONs (keeps binaries and config)
-make clean-all         # delete PKI, data, logs, binaries
+make clean             # stop-all + remove pki/, data/, logs/, .admin-password and namespaces
+# Note: there is no clean-all target in current Makefile
 ```
 
 ---
