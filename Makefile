@@ -345,7 +345,7 @@ start-tunnel-core: build-n2-gateway
 	@echo "✓ N2 core gateway started (UDP:127.0.0.1:38413→SCTP:127.0.0.18:38412)"
 
 start-tunnel-gnb: build-n2-gateway
-	@echo ">>> Starting Tunneler in gnb-ns (run/tproxy mode)..."
+	@echo ">>> Starting Tunneler in gnb-ns (run/TUN mode)..."
 	@echo ">>> Setting gnb-ns DNS to Ziti DNS (100.64.0.1)..."
 	-sudo mkdir -p /etc/netns/gnb-ns
 	-echo -e "nameserver 100.64.0.1\noptions timeout:1 attempts:1" | sudo tee /etc/netns/gnb-ns/resolv.conf >/dev/null
@@ -371,7 +371,7 @@ start-tunnel-gnb: build-n2-gateway
 	@sudo ip netns exec gnb-ns pgrep -f "ziti-edge-tunnel run --identity" | tail -n1 > $(DATA_DIR)/tunnel-gnb.pid || true
 	@sleep 3
 	@echo "✓ gNB Tunneler started in gnb-ns"
-	@echo ">>> Adding UPF route (required for tproxy interception)..."
+	@echo ">>> Adding UPF route (required for route-based tunnel interception)..."
 	sudo ip netns exec gnb-ns \
 		ip route add 10.10.2.0/24 via 10.10.1.1 2>/dev/null || true
 	@echo ">>> Starting N2 SCTP-aware gateway (in gnb-ns)..."

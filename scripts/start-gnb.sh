@@ -55,7 +55,7 @@ create_configs() {
 #
 #   N3 GTP-U:
 #     gNB sends UDP to UPF address informed by AMF (10.10.2.2:2152)
-#     → Intercepted by Tunneler tproxy in gnb-ns
+#     → Routed by Tunneler into ziti0 in gnb-ns
 #     → Ziti Fabric → Core Tunneler → UPF
 # =============================================================================
 
@@ -162,9 +162,9 @@ start_gnb() {
 
     > "$PID_FILE"
 
-    # 確保 tproxy 需要的路由存在（到 UPF 的路由，讓 tproxy 可以攔截）
+    # 確保到 UPF 的路由存在（讓目的地可被導向 ziti0）
     # 10.10.2.2 是 core-ns 的 IP，gNB 會嘗試送 GTP-U 到這裡
-    # tproxy 會在 OUTPUT chain 攔截，但需要路由先存在
+    # run(TUN) 會依目的地路由將流量送入 ziti0
     ns_exec ip route add 10.10.2.0/24 via 10.10.1.1 2>/dev/null || true
     # 確保 gNB-side Tunneler 一直能連到 Controller 管理位址
     # 避免 UE 啟動後將 10.10.3.1 誤導到 uesimtun0

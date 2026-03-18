@@ -9,7 +9,7 @@
 #
 #   N3 GTP-U:
 #     gNB sends UDP to the UPF address informed by AMF (10.10.2.2:2152)
-#     -> Intercepted by Tunneler tproxy in gnb-ns
+#     -> Routed by Tunneler into ziti0 in gnb-ns
 #     -> Ziti Fabric -> Core Tunneler -> UPF
 # =============================================================================
 

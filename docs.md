@@ -77,7 +77,7 @@ Before (traditional):
 
 After (Ziti overlay):
   gNB ─► n2-gateway ─► Tunneler ─► Ziti Fabric (mTLS) ─► Tunneler ─► n2-gateway ─► AMF
-  gNB ─► Tunneler  (tproxy) ────► Ziti Fabric (mTLS) ──────────────► Tunneler  ─► UPF
+  gNB ─► Tunneler  (run/TUN) ───► Ziti Fabric (mTLS) ──────────────► Tunneler  ─► UPF
          │
          ● AMF/UPF expose no ports on the network
          ● Every gNB has a unique cryptographic identity (revocable)
@@ -138,18 +138,18 @@ The **Tunneler** is a local proxy agent deployed on each endpoint host:
 
 | Mode | Used on | Behavior |
 |------|---------|----------|
-| `run` (tproxy) | gNB side | Intercepts outgoing traffic transparently via iptables `TPROXY`; also provides DNS for `.ziti` names |
+| `run` (TUN) | gNB side | Creates `ziti0` and steers matched destinations (e.g., `amf.ziti`, `10.10.2.2`) through the overlay; also provides DNS for `.ziti` names |
 | `run-host` | Core side | Only hosts (binds) services; delivers Ziti traffic to local service addresses |
 
-#### Why tproxy rather than tun?
+#### Current Intercept Mode (Observed)
 
-| Aspect | tproxy | tun |
-|--------|--------|-----|
-| Intercept mechanism | iptables `mangle` table, kernel-level redirect | Virtual NIC `ziti0`, userspace roundtrip |
-| Packet modification | Does not alter src/dst IP | Requires NAT or conntrack workarounds |
-| UDP handling | Natively preserves original destination for connectionless UDP (critical for GTP-U) | Needs extra conntrack/DNAT for stateless UDP |
-| Performance | Higher (zero kernel/userspace copy) | Lower |
-| Namespace isolation | iptables rules are namespace-scoped, no leakage | Route tables may conflict with veth routes |
+Current runtime verification in this project shows `ziti-edge-tunnel run` operating in **TUN mode**:
+
+- `ziti0` exists in `gnb-ns` and `core-ns`
+- `iptables -t mangle` has no TPROXY redirect rules for Ziti interception
+- Destination routes such as `10.10.2.2 dev ziti0` steer traffic into the overlay
+
+For this codebase, the effective path is route-based interception via `ziti0`, not iptables TPROXY redirection.
 
 ---
 
@@ -172,7 +172,7 @@ To simulate a multi-machine deployment on a single host, the project uses Linux 
 
 | Namespace | IP Addresses | Components |
 |-----------|-------------|------------|
-| **gnb-ns** | 10.10.1.2/24 | UERANSIM gNB, `ziti-edge-tunnel run` (tproxy), `n2-sctp-gateway` (gnb mode) |
+| **gnb-ns** | 10.10.1.2/24 | UERANSIM gNB, `ziti-edge-tunnel run` (TUN mode), `n2-sctp-gateway` (gnb mode) |
 | **router-ns** | 10.10.1.1, 10.10.2.1, 10.10.3.1 | Ziti Controller, Ziti Edge Router |
 | **core-ns** | 10.10.2.2/24, 10.10.4.1/24 | free5gc NFs, `ziti-edge-tunnel run-host`, `ziti-edge-tunnel run` (core-upf-dialer), `n2-sctp-gateway` (core mode) |
 | **Host** | 10.10.3.2/24, 10.10.4.2/24 | CLI management, N6 NAT |
@@ -195,11 +195,11 @@ This guarantees **all gNB traffic must traverse the Ziti Fabric** to reach the c
 
 | Problem without namespaces | Cause |
 |---------------------------|-------|
-| Two Tunnelers conflict | The tproxy/iptables rules from `run` mode leak and affect the core-side traffic |
-| Route table pollution | `ip rule` / `ip route` entries from tproxy are host-global |
+| Two Tunnelers conflict | Multiple `run` instances can interfere if route/table state is shared outside isolated namespaces |
+| Route table pollution | `ip rule` / `ip route` changes from tunnel processes can pollute a shared host routing context |
 | No isolation | Programs on the same host share loopback and can bypass Ziti entirely |
 
-Each namespace has its own iptables, routing table, `lo`, and tproxy/tun interfaces — completely independent.
+Each namespace has its own iptables, routing table, `lo`, and tunnel interfaces — completely independent.
 
 ---
 
@@ -392,7 +392,7 @@ Losing this metadata causes NGAP to malfunction. The project therefore includes 
 gnb-ns side:
   gNB (SCTP:38412) ──► n2-sctp-gateway --mode gnb
                           └─► encapsulate SCTP frame + metadata into UDP
-                              └─► send to amf.ziti:38412 (intercepted by Tunneler tproxy)
+                              └─► send to amf.ziti:38412 (routed into `ziti0` by Tunneler)
                                   └─► travels through Ziti Fabric as UDP
 
 core-ns side:
@@ -436,7 +436,7 @@ Step  Namespace  Component              Action
   1   gnb-ns     UERANSIM gNB           Sends SCTP to 127.0.0.1:38412
   2   gnb-ns     n2-sctp-gateway (gnb)  Receives SCTP; encapsulates frame+metadata into UDP
                                         Sends UDP to amf.ziti:38412
-  3   gnb-ns     ziti-edge-tunnel       tproxy intercepts UDP to amf.ziti:38412
+  3   gnb-ns     ziti-edge-tunnel       Route/DNS match steers UDP to amf.ziti:38412 into ziti0
                  (run mode)             Dials n2-ngap-service through Ziti Fabric
   4   fabric     Ziti Edge Router       mTLS-encrypts and forwards to Bind side
   5   core-ns    ziti-edge-tunnel       Receives n2-ngap-service data
@@ -452,7 +452,7 @@ Step  Namespace  Component              Action
 Step  Namespace  Component              Action
 ────  ─────────  ─────────────────────  ─────────────────────────────────────────────
   1   gnb-ns     UERANSIM gNB           Sends GTP-U UDP to 10.10.2.2:2152 (UPF addr)
-  2   gnb-ns     ziti-edge-tunnel       tproxy intercepts UDP:2152 to 10.10.2.2
+  2   gnb-ns     ziti-edge-tunnel       Route `10.10.2.2 dev ziti0` sends UDP:2152 into overlay
                  (run mode)             Dials n3-gtpu-service through Ziti Fabric
   3   fabric     Ziti Edge Router       mTLS-encrypts and forwards
   4   core-ns    ziti-edge-tunnel       Delivers to host: 10.10.2.2:2152 (UDP)
@@ -466,7 +466,7 @@ Step  Namespace  Component              Action
 Step  Namespace  Component              Action
 ────  ─────────  ─────────────────────  ─────────────────────────────────────────────
   1   core-ns    free5gc UPF            Sends GTP-U UDP to 10.10.1.2:2152 (gNB addr)
-  2   core-ns    ziti-edge-tunnel       tproxy intercepts UDP:2152 to 10.10.1.2
+  2   core-ns    ziti-edge-tunnel       `run` identity dials n3-gtpu-dl-service for UDP:2152 downlink
                  (run mode, upf-dialer) Dials n3-gtpu-dl-service through Ziti Fabric
   3   fabric     Ziti Edge Router       mTLS-encrypts and forwards
   4   gnb-ns     ziti-edge-tunnel       Delivers to host: 10.10.1.2:2152 (UDP)
@@ -611,7 +611,7 @@ sudo make tunneler
 #   n2-sctp-gateway --mode core
 #
 # Starts in gnb-ns:
-#   ziti-edge-tunnel run       (identity: gnb-01, tproxy mode)
+#   ziti-edge-tunnel run       (identity: gnb-01, TUN mode)
 #   n2-sctp-gateway --mode gnb
 ```
 
@@ -678,10 +678,10 @@ sudo ip netns exec core-ns tcpdump -i lo -n 'udp port 38413 or sctp port 38412'
 ### N3 GTP-U Packet Capture
 
 ```bash
-# gnb-ns — gNB sends GTP-U; tproxy intercepts before it leaves the namespace
+# gnb-ns — gNB sends GTP-U; route-based interception sends matching destination into ziti0
 sudo ip netns exec gnb-ns tcpdump -i any -n 'udp port 2152'
 
-# gnb-ns veth — should NOT see plaintext GTP-U (tproxy intercepts in OUTPUT chain)
+# gnb-ns veth — should NOT see plaintext GTP-U (overlay path is carried as TLS:3022)
 sudo ip netns exec gnb-ns tcpdump -i veth-gnb -n 'udp port 2152'
 # Expected: no packets captured
 
@@ -740,12 +740,12 @@ wireshark /tmp/core-lo.pcap &
 
 | Symptom | Diagnostic Command | Resolution |
 |---------|-------------------|------------|
-| Tunneler cannot connect to Router | `sudo ip netns exec gnb-ns curl -sk https://10.10.1.1:3022` | Check veth routing; verify Router cert SANs include 10.10.1.1 |
+| Tunneler cannot connect to Router | `sudo ip netns exec gnb-ns curl -sk https://10.10.3.1:3022` | Check gnb-ns route pinning to 10.10.3.1 and verify Router cert SANs include 10.10.3.1 |
 | `Address already in use` on port 38412 | `sudo ip netns exec gnb-ns ss -tlnp \| grep 38412` | Kill the occupying process; restart n2-gateway |
-| tproxy rules not applied | `sudo ip netns exec gnb-ns iptables -t mangle -L -n -v` | Ensure `ziti-edge-tunnel run` is started as root |
+| Traffic not entering Ziti tunnel | `sudo ip netns exec gnb-ns ip route show` | Verify destination routes map to `ziti0` (e.g., `10.10.2.2 dev ziti0`) and `ziti-edge-tunnel run` is healthy |
 | gNB fails to register with AMF | `tail -f logs/n2gw-gnb.log` | Confirm both n2-sctp-gateway and ziti-edge-tunnel are running in gnb-ns |
 | N3 GTP-U not passing through | Check UPF gtpu bind address | Ensure `upfcfg.yaml` has `gtpu.addr: 10.10.2.2` |
-| Plaintext GTP-U visible on veth-gnb | tproxy not intercepting | Check `ip rule` and `ip route` in gnb-ns; Tunneler must run before gNB starts |
+| Plaintext GTP-U visible on veth-gnb | Route steering not effective | Check `ip route` in gnb-ns/core-ns and confirm `ziti0` exists; restart tunneler before gNB |
 | Namespace veth unreachable | `sudo ip netns exec gnb-ns ip route` | Verify veth pair is up and the correct route exists |
 | Controller JWT enrollment fails | `tail -f logs/controller.log` | Check that server cert SAN covers the IP the enrolling client uses |
 | `ziti edge list` shows empty | `make login` not run | Run `make login` first (session token may have expired) |

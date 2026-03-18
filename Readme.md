@@ -11,7 +11,7 @@ Zero-trust overlay for a 5G core network — protects the N2 / N3 / N4 interface
   │  UERANSIM gNB    │        │  Ziti Controller  :1280 / :6262  │       │  free5gc NFs     │
   │  n2-sctp-gateway │──UDP──►│  Ziti Edge Router :3022          │──UDP─►│  n2-sctp-gateway │
   │  ziti-edge-tunnel│  mTLS  │  (fabric, mTLS encrypted)        │  mTLS │  ziti-edge-tunnel│
-  │  (run / tproxy)  │        └──────────────────────────────────┘       │  (run-host)      │
+  │  (run / TUN)     │        └──────────────────────────────────┘       │  (run-host)      │
   └──────────────────┘                                                    └──────────────────┘
         ▲ iptables DROP between gnb-ns ↔ core-ns — all traffic must pass through Ziti ▲
 ```
