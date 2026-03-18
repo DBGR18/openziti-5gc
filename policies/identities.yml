@@ -1,26 +1,26 @@
 # =============================================================================
-# Ziti Identities 定義
-# 每個 gNB 與核網組件各一個 Identity
+# Ziti Identities Definitions
+# One Identity for each gNB and core network component
 #
-# 修改此檔後執行: make apply-identities
+# After modifying this file, run: make apply-identities
 # =============================================================================
 
 identities:
 
   # ===================================================================
-  # gNB 側（RAN 端）
-  # 每台 gNB 主機上的 Tunneler 需要一個獨立 Identity
+  # gNB side (RAN side)
+  # Each gNB host Tunneler needs a separate Identity
   # ===================================================================
 
   - name: gnb-01
     type: Device
     roleAttributes:
-      - gnb-side           # 用於 Service Policy 匹配
-      - region-north       # 可選：依地區分類
+      - gnb-side           # Used for Service Policy matching
+      - region-north       # Optional: Classify by region
     enrollment:
-      ott: true            # One-Time-Token 自動 enroll
+      ott: true            # One-Time-Token automatic enrollment
 
-  # 需要更多 gNB 時複製並修改：
+  # Copy and modify when more gNBs are needed:
   # - name: gnb-02
   #   type: Device
   #   roleAttributes:
@@ -38,15 +38,15 @@ identities:
   #     ott: true
 
   # ===================================================================
-  # 核網側（Core Network 端）
-  # AMF 和 UPF 所在主機的 Tunneler 身份
+  # Core network side (Core Network side)
+  # Tunneler identity of the host where AMF and UPF are located
   # ===================================================================
 
   - name: core-amf-host
     type: Device
     roleAttributes:
       - core-side
-      - control-plane-host  # 可提供 N2 服務
+      - control-plane-host  # Can provide N2 service
     enrollment:
       ott: true
 
@@ -54,11 +54,11 @@ identities:
     type: Device
     roleAttributes:
       - core-side
-      - user-plane-host     # 可提供 N3/N4 服務
+      - user-plane-host     # Can provide N3/N4 service
     enrollment:
       ott: true
 
-  # core-ns 內用於攔截下行 N3（UPF -> gNB）並送入 Ziti 的身份
+  # Identity in core-ns used to intercept downlink N3 (UPF -> gNB) and send it to Ziti
   - name: core-upf-dialer
     type: Device
     roleAttributes:
@@ -67,7 +67,7 @@ identities:
     enrollment:
       ott: true
 
-  # 如果 AMF 和 UPF 在同一台主機，可以合併成一個 Identity：
+  # If AMF and UPF are on the same host, they can be merged into one Identity:
   # - name: core-all-in-one
   #   type: Device
   #   roleAttributes:

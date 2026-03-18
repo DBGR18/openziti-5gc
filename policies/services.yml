@@ -1,20 +1,20 @@
 # =============================================================================
-# Ziti Services 定義
-# 對應 free5gc 的 N2 / N3 / N4 介面
+# Ziti Services Definitions
+# Corresponding to free5gc N2 / N3 / N4 interfaces
 #
-# 修改此檔後執行: make apply-services
+# After modifying this file, run: make apply-services
 # =============================================================================
 
 services:
 
   # -------------------------------------------------------------------
-  # N2 控制面：gNB ↔ AMF（SCTP/NGAP, Port 38412）
-  # 方案 2：SCTP-aware gateway over Ziti UDP
+  # N2 Control Plane: gNB <-> AMF (SCTP/NGAP, Port 38412)
+  # Option 2: SCTP-aware gateway over Ziti UDP
   #
-  #   gNB 側: gNB(SCTP:38412) → n2-gateway(SCTP→UDP frame) → Tunneler intercept
-  #   核網側: Tunneler host → n2-gateway(UDP frame→SCTP) → AMF(SCTP:38412)
+  #   gNB side: gNB(SCTP:38412) -> n2-gateway(SCTP->UDP frame) -> Tunneler intercept
+  #   Core network side: Tunneler host -> n2-gateway(UDP frame->SCTP) -> AMF(SCTP:38412)
   #
-  # Ziti 傳輸的是 UDP datagram；gateway 會保留 PPID/stream 等 SCTP metadata
+  # Ziti transmits UDP datagrams; the gateway preserves SCTP metadata such as PPID/stream
   # -------------------------------------------------------------------
   - name: n2-ngap-service
     roleAttributes:
@@ -23,22 +23,22 @@ services:
     configs:
       intercept:
         protocols:
-          - udp                # gNB 側 gateway 轉出的是 UDP frame
+          - udp                # The UDP frame sent from the gNB side gateway
         addresses:
-          - amf.ziti           # gNB 側 gateway 連這個虛擬地址
+          - amf.ziti           # The gNB side gateway connects to this virtual address
         portRanges:
           - low: 38412
             high: 38412
       host:
         protocol: udp
-        address: 127.0.0.1     # 核網側 gateway 監聽在 localhost
-        port: 38413            # gateway UDP:38413 → SCTP:127.0.0.18:38412
+        address: 127.0.0.1     # The core network side gateway listens on localhost
+        port: 38413            # gateway UDP:38413 -> SCTP:127.0.0.18:38412
 
   # -------------------------------------------------------------------
-  # N3 用戶面：gNB ↔ UPF（GTP-U, UDP Port 2152）
-  # UPF 在 core-ns (10.10.2.2)，upfcfg.yaml 中 gtpu.addr 設為 10.10.2.2
-  # SMF 會告訴 gNB: UPF 在 10.10.2.2:2152
-  # gnb-ns 的 tproxy 會放截此封包 → Ziti → core-ns Tunneler → UPF
+  # N3 User Plane: gNB <-> UPF (GTP-U, UDP Port 2152)
+  # UPF is in core-ns (10.10.2.2), gtpu.addr is set to 10.10.2.2 in upfcfg.yaml
+  # SMF informs gNB: UPF is at 10.10.2.2:2152
+  # gnb-ns tproxy intercepts this packet -> Ziti -> core-ns Tunneler -> UPF
   # -------------------------------------------------------------------
   - name: n3-gtpu-service
     roleAttributes:
@@ -49,19 +49,19 @@ services:
         protocols:
           - udp
         addresses:
-          - "10.10.2.2"        # UPF 在 core-ns 的 veth IP
+          - "10.10.2.2"        # veth IP of UPF in core-ns
         portRanges:
           - low: 2152
             high: 2152
       host:
         protocol: udp
-        address: 10.10.2.2     # core-ns 內的 UPF address
+        address: 10.10.2.2     # UPF address within core-ns
         port: 2152
 
   # -------------------------------------------------------------------
-  # N3 下行：UPF -> gNB（GTP-U, UDP Port 2152）
-  # core-ns 攔截 UPF 發往 10.10.1.2:2152 的下行封包，經 Ziti 送到 gNB 的實際 GTP-U 監聽位址。
-  # 實測 UERANSIM gNB 綁定在 10.10.1.2:2152，而非 127.0.0.1:2152。
+  # N3 Downlink: UPF -> gNB (GTP-U, UDP Port 2152)
+  # core-ns intercepts downlink packets from UPF to 10.10.1.2:2152 and sends them via Ziti to the gNB GTP-U listening address.
+  # UERANSIM gNB is verified to bind to 10.10.1.2:2152 instead of 127.0.0.1:2152.
   # -------------------------------------------------------------------
   - name: n3-gtpu-dl-service
     roleAttributes:
@@ -72,23 +72,23 @@ services:
         protocols:
           - udp
         addresses:
-          - "10.10.1.2"        # gNB 的 GTP-U 位址（UPF 下行實際目標）
+          - "10.10.1.2"        # gNB GTP-U address (actual UPF downlink target)
         portRanges:
           - low: 2152
             high: 2152
       host:
         protocol: udp
-        address: 10.10.1.2      # gNB 程序實際監聽位址
+        address: 10.10.1.2      # The actual listening address of the gNB process
         port: 2152
 
   # -------------------------------------------------------------------
-  # N4 控制面（可選）：SMF ↔ UPF（PFCP, UDP Port 8805）
-  # 對應 smfcfg.yaml 的 pfcp.nodeID: 127.0.0.1 → UPF pfcp.addr: 127.0.0.8
+  # N4 Control Plane (optional): SMF <-> UPF (PFCP, UDP Port 8805)
+  # Corresponding to smfcfg.yaml pfcp.nodeID: 127.0.0.1 -> UPF pfcp.addr: 127.0.0.8
   # -------------------------------------------------------------------
   # -------------------------------------------------------------------
-  # N4 控制面（可選）：SMF ↔ UPF（PFCP, UDP Port 8805）
-  # 在三 ns 模型中，SMF 和 UPF 都在 core-ns，N4 不跨 namespace
-  # 此服務僅在 SMF/UPF 分離部署時才需要
+  # N4 Control Plane (optional): SMF <-> UPF (PFCP, UDP Port 8805)
+  # In the 3-ns model, SMF and UPF are both in core-ns, so N4 does not cross namespaces
+  # This service is only needed when SMF/UPF are deployed separately
   # -------------------------------------------------------------------
   - name: n4-pfcp-service
     roleAttributes:
@@ -99,18 +99,18 @@ services:
         protocols:
           - udp
         addresses:
-          - "10.10.2.2"        # 與 N3 相同，UPF 在 core-ns
+          - "10.10.2.2"        # Same as N3, UPF in core-ns
         portRanges:
           - low: 8805
             high: 8805
       host:
         protocol: udp
-        address: 127.0.0.8     # core-ns 內 UPF PFCP 監聽地址
+        address: 127.0.0.8     # UPF PFCP listening address in core-ns
         port: 8805
 
   # -------------------------------------------------------------------
-  # SBI 服務匯流排（可選）：NF 之間的 HTTP/2 SBI 通訊
-  # 保護 NRF, AMF, SMF 等之間的 SBI
+  # SBI Service Bus (optional): HTTP/2 SBI communication between NFs
+  # Protect SBI between NRF, AMF, SMF, etc.
   # -------------------------------------------------------------------
   # - name: sbi-nrf-service
   #   roleAttributes:

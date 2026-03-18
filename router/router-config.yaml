@@ -1,9 +1,9 @@
 # =============================================================================
-# OpenZiti Edge Router 設定檔
-# 三 Namespace 部署版本：Router 運行在 router-ns 內
+# OpenZiti Edge Router Configuration File
+# 3-Namespace deployment version: Router runs in router-ns
 #
-# router-ns IP：
-#   10.10.1.1 (gnb-ns 側)   10.10.2.1 (core-ns 側)   10.10.3.1 (Host 側)
+# router-ns IP:
+#   10.10.1.1 (gnb-ns side)   10.10.2.1 (core-ns side)   10.10.3.1 (Host side)
 # =============================================================================
 v: 3
 identity:
@@ -14,7 +14,7 @@ identity:
   server_key:  pki/ca/keys/router-client.key
 
 ctrl:
-  # Controller 在同一個 router-ns，用 localhost 即可
+  # Controller is in the same router-ns, localhost is sufficient
   endpoint: tls:127.0.0.1:6262
   heartbeatIntervalSeconds: 10
 
@@ -22,12 +22,12 @@ link:
   dialers:
     - binding: transport
 
-# Router 只做 Fabric 路由，不做 tunnel intercept/host
+# Router only performs Fabric routing, no tunnel intercept/host
 listeners:
   - binding: edge
     address: tls:0.0.0.0:3022
     options:
-      # 透過 router-ns 的 Host 側位址對外廣播，gnb/core 皆可達
+      # Broadcast through the Host side address of router-ns, reachable by both gnb/core
       advertise: 10.10.3.1:3022
       maxConnections: 32768
 

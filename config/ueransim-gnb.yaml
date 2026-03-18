@@ -1,16 +1,16 @@
 # =============================================================================
-# UERANSIM gNB — 適用於 gnb-ns namespace + Ziti 保護
+# UERANSIM gNB -- for gnb-ns namespace + Ziti protection
 #
-# 重要：
-#   linkIp/ngapIp/gtpIp: 使用 127.0.0.1 (gnb-ns 內的 loopback)
-#   AMF address: 連到本地 n2 gateway (127.0.0.1:38412)
-#     gateway 把 SCTP payload + metadata → UDP frame → Ziti Tunneler → Ziti Fabric
-#     → Core Tunneler → gateway → AMF
+# Important:
+#   linkIp/ngapIp/gtpIp: Use 127.0.0.1 (loopback in gnb-ns)
+#   AMF address: connect to local n2 gateway (127.0.0.1:38412)
+#     gateway sends SCTP payload + metadata -> UDP frame -> Ziti Tunneler -> Ziti Fabric
+#     -> Core Tunneler -> gateway -> AMF
 #
 #   N3 GTP-U:
-#     gNB 送 UDP 到 AMF 告知的 UPF 地址 (10.10.2.2:2152)
-#     → gnb-ns 內的 Tunneler tproxy 攔截
-#     → Ziti Fabric → Core Tunneler → UPF
+#     gNB sends UDP to the UPF address informed by AMF (10.10.2.2:2152)
+#     -> Intercepted by Tunneler tproxy in gnb-ns
+#     -> Ziti Fabric -> Core Tunneler -> UPF
 # =============================================================================
 
 mcc: '208'
@@ -19,11 +19,11 @@ nci: '0x000000010'
 idLength: 32
 tac: 1
 
-linkIp: 127.0.0.1     # gNB 內部連線（gnb-ns loopback）
-ngapIp: 127.0.0.1     # N2 本地端（gNB 側）
-gtpIp:  10.10.1.2     # N3 位址（供 UPF 下行送回 gNB）
+linkIp: 127.0.0.1     # gNB internal connection (gnb-ns loopback)
+ngapIp: 127.0.0.1     # N2 Local end (gNB side)
+gtpIp:  10.10.1.2     # N3 address (for UPF downlink back to gNB)
 
-# AMF 連線 — 指向本地 n2 gateway (SCTP:38412 → UDP frame → Ziti)
+# AMF Connection -- points to local n2 gateway (SCTP:38412 -> UDP frame -> Ziti)
 amfConfigs:
   - address: 127.0.0.1
     port: 38412

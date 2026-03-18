@@ -1,27 +1,27 @@
 # =============================================================================
 # Ziti Edge Router Policies & Service Edge Router Policies
-# 控制哪些 Identity 可以使用哪些 Router 接入
+# Control which Identities can access which Routers
 #
-# 修改此檔後執行: make apply-policies
+# After modifying this file, run: make apply-policies
 # =============================================================================
 
 edgeRouterPolicies:
 
-  # 所有 gNB 可使用所有 Router
+  # All gNBs can use all Routers
   - name: gnb-use-all-routers
     identityRoles:
       - "#gnb-side"
     edgeRouterRoles:
       - "#all"
 
-  # 所有核網主機可使用所有 Router
+  # All core network hosts can use all Routers
   - name: core-use-all-routers
     identityRoles:
       - "#core-side"
     edgeRouterRoles:
       - "#all"
 
-  # 進階：依區域限制可用的 Router
+  # Advanced: Limit available Routers by area
   # - name: north-gnb-north-router
   #   identityRoles:
   #     - "#region-north"
@@ -30,7 +30,7 @@ edgeRouterPolicies:
 
 serviceEdgeRouterPolicies:
 
-  # 所有核網服務可透過所有 Router 提供
+  # All core network services can be provided through all Routers
   - name: core-services-all-routers
     serviceRoles:
       - "#core-services"

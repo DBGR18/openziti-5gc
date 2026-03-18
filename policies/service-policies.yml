@@ -1,26 +1,26 @@
 # =============================================================================
-# Ziti Service Policies — 存取控制策略
-# 定義「誰可以呼叫（Dial）或提供（Bind）哪些服務」
+# Ziti Service Policies -- Access Control Policies
+# Define "who can Dial or Bind which services"
 #
-# 修改此檔後執行: make apply-policies
+# After modifying this file, run: make apply-policies
 # =============================================================================
 
 servicePolicies:
 
   # -------------------------------------------------------------------
-  # Dial 策略：gNB 可以「呼叫」哪些核網服務
+  # Dial policy: which core network services the gNB can "Call"
   # -------------------------------------------------------------------
 
-  # 所有 gNB 可存取 N2（AMF）和 N3（UPF）
+  # All gNBs can access N2 (AMF) and N3 (UPF)
   - name: gnb-dial-n2-n3
     type: Dial
     identityRoles:
-      - "#gnb-side"            # 符合「gnb-side」角色的所有 Identity
+      - "#gnb-side"            # All Identities matching the "gnb-side" role
     serviceRoles:
       - "#control-plane"       # N2 NGAP
       - "#user-plane"          # N3 GTP-U
 
-  # core-upf-dialer 可將下行 N3（UPF -> gNB）送入 Ziti
+  # core-upf-dialer can send downlink N3 (UPF -> gNB) into Ziti
   - name: core-dial-n3-downlink
     type: Dial
     identityRoles:
@@ -29,10 +29,10 @@ servicePolicies:
       - "#user-plane-downlink"
 
   # -------------------------------------------------------------------
-  # Bind 策略：核網主機可以「提供」哪些服務
+  # Bind policy: which services core network hosts can "Provide"
   # -------------------------------------------------------------------
 
-  # AMF 主機提供 N2 服務
+  # AMF host provides N2 service
   - name: core-bind-n2
     type: Bind
     identityRoles:
@@ -40,7 +40,7 @@ servicePolicies:
     serviceRoles:
       - "#control-plane"
 
-  # UPF 主機提供 N3 和 N4 服務
+  # UPF host provides N3 and N4 services
   - name: core-bind-n3-n4
     type: Bind
     identityRoles:
@@ -49,7 +49,7 @@ servicePolicies:
       - "#user-plane"
       - "#pfcp-plane"
 
-  # gNB side tunneler 提供下行 N3 的 host 端點（10.10.1.2:2152）
+  # gNB side tunneler provides the downlink N3 host endpoint (10.10.1.2:2152)
   - name: gnb-bind-n3-downlink
     type: Bind
     identityRoles:
@@ -58,10 +58,10 @@ servicePolicies:
       - "#user-plane-downlink"
 
   # -------------------------------------------------------------------
-  # 進階策略範例（取消註解啟用）
+  # Advanced policy examples (uncomment to enable)
   # -------------------------------------------------------------------
 
-  # 限制：只有北部 gNB 能連北部核網
+  # Restriction: only northern gNBs can connect to the northern core network
   # - name: north-region-only
   #   type: Dial
   #   identityRoles:
@@ -69,7 +69,7 @@ servicePolicies:
   #   serviceRoles:
   #     - "#core-north"
 
-  # SMF 可存取 N4 PFCP
+  # SMF can access N4 PFCP
   # - name: smf-dial-n4
   #   type: Dial
   #   identityRoles:

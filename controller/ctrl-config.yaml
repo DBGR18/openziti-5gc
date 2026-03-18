@@ -1,9 +1,9 @@
 # =============================================================================
-# OpenZiti Controller 設定檔
-# 三 Namespace 部署版本：Controller 運行在 router-ns 內
+# OpenZiti Controller Configuration File
+# 3-Namespace deployment version: Controller runs in router-ns
 #
-# router-ns IP：
-#   10.10.1.1 (gnb-ns 側)   10.10.2.1 (core-ns 側)   10.10.3.1 (Host 側)
+# router-ns IP:
+#   10.10.1.1 (gnb-ns side)   10.10.2.1 (core-ns side)   10.10.3.1 (Host side)
 # =============================================================================
 v: 3
 
@@ -16,17 +16,17 @@ identity:
   server_cert: pki/ca/certs/ctrl-server.chain.pem
   server_key:  pki/ca/keys/ctrl-server.key
 
-# 控制平面監聽（Router 連入用）
+# Control plane listener (for Router connections)
 ctrl:
   listener: tls:0.0.0.0:6262
   options:
-    # Router 在同一 namespace，用 localhost 即可
-    # gnb-ns/core-ns 的 Tunneler 也需透過 10.10.x.1 連入
+    # Router is in the same namespace, localhost is sufficient
+    # Tunneler in gnb-ns/core-ns also needs to connect via 10.10.x.1
     advertiseAddress: tls:10.10.3.1:6262
     connectTimeout: 15s
     writeTimeout: 15s
 
-# Edge 管理 API
+# Edge Management API
 edge:
   enrollment:
     signingCert:
@@ -38,7 +38,7 @@ edge:
       duration: 180m
   api:
     listener: 0.0.0.0:1280
-    # Host 透過 10.10.3.1 管理，gnb-ns 用 10.10.1.1，core-ns 用 10.10.2.1
+    # Host managed via 10.10.3.1, gnb-ns uses 10.10.1.1, core-ns uses 10.10.2.1
     address: 10.10.3.1:1280
     sessionTimeout: 30m
     activityTimeout: 10m
