@@ -113,8 +113,8 @@ Start N2 gateways over underlay (no `.ziti`):
 sudo ip netns exec core-ns pkill -f n2-sctp-gateway 2>/dev/null || true
 sudo ip netns exec gnb-ns  pkill -f n2-sctp-gateway 2>/dev/null || true
 
-sudo ip netns exec core-ns bash -lc 'cd /home/vboxuser/openziti-5gc && nohup ./bin/n2-sctp-gateway --mode core --udp-listen 10.10.2.2:38413 --amf-sctp 127.0.0.18:38412 > logs/n2gw-core-underlay.log 2>&1 &'
-sudo ip netns exec gnb-ns  bash -lc 'cd /home/vboxuser/openziti-5gc && nohup ./bin/n2-sctp-gateway --mode gnb  --sctp-listen 127.0.0.1:38412 --udp-remote 10.10.2.2:38413 > logs/n2gw-gnb-underlay.log 2>&1 &'
+sudo ip netns exec core-ns bash -lc 'nohup ./bin/n2-sctp-gateway --mode core --udp-listen 10.10.2.2:38413 --amf-sctp 127.0.0.18:38412 > logs/n2gw-core-underlay.log 2>&1 &'
+sudo ip netns exec gnb-ns  bash -lc 'nohup ./bin/n2-sctp-gateway --mode gnb  --sctp-listen 127.0.0.1:38412 --udp-remote 10.10.2.2:38413 > logs/n2gw-gnb-underlay.log 2>&1 &'
 ```
 
 Start gNB + UE:
@@ -170,8 +170,7 @@ Run these commands in **both** baseline and via-Ziti modes (after UE is attached
 Create an output folder:
 ```bash
 MODE=baseline   # or: via-ziti
-TS=$(date +%Y%m%d-%H%M%S)
-OUT="logs/bench-upf-${TS}-${MODE}-latjit"
+OUT="logs/${MODE}-latjit"
 mkdir -p "$OUT"
 ```
 
@@ -210,34 +209,34 @@ Notes:
 - Keep `-b` and `-t` identical between baseline and via-Ziti for apples-to-apples comparison.
 
 ## 7) Measured Results
-
+Experiment setup: AMD EPYC 7543 processor with 10 virtual CPUs, running Ubuntu 22.04.5 LTS with Linux kernel version 5.15.0-143-generic.
 ### 7.1 TCP throughput (10s, `-P 4`) — UE → CN → DN
 
 Example logs:
-- Baseline (no Ziti): `logs/bench-upf-20260316-164729-upf-baseline/`
-- Via-Ziti (N3 over Ziti): `logs/bench-upf-20260316-164936-upf-via-ziti/`
+- Baseline (no Ziti): `logs/baseline-latjit/`
+- Via-Ziti (N3 over Ziti): `logs/via-ziti-latjit/`
 
 Results:
-- **Baseline (no OpenZiti):** sender **~149.9 Mbits/sec**, receiver **~148.1 Mbits/sec**
-- **Via-Ziti (N3 over OpenZiti):** sender **~56.1 Mbits/sec**, receiver **~54.4 Mbits/sec**
+- **Baseline (no OpenZiti):** sender **~133 Mbits/sec**, receiver **~132 Mbits/sec**
+- **Via-Ziti (N3 over OpenZiti):** sender **~68 Mbits/sec**, receiver **~67 Mbits/sec**
 
 ### 7.2 Latency & jitter — UE → CN → DN
 
 Example logs:
-- Baseline: `logs/bench-upf-20260316-165520-baseline-latjit/`
-- Via-Ziti: `logs/bench-upf-20260316-165702-via-ziti-latjit/`
+- Baseline: `logs/baseline-latjit/`
+- Via-Ziti: `logs/via-ziti-latjit/`
 
 **ICMP ping (UE → DN)**
-- Baseline (4 packets): rtt min/avg/max/mdev = **0.870/1.120/1.432/0.218 ms**
-- Via-Ziti (50 packets): rtt min/avg/max/mdev = **2.158/17.310/453.490/69.018 ms**
+- Baseline (50 packets): rtt min/avg/max/mdev = **0.384/0.614/0.822/0.096 ms**
+- Via-Ziti (50 packets): rtt min/avg/max/mdev = **0.99/1.376/1.858/0.188 ms**
 
 **TCP connect latency (100 connects to `10.10.5.2:5201`, timeout 2s)**
-- Baseline: avg **5.28 ms**, p50 **1.67 ms**, p90 **11.22 ms**, p99 **45.21 ms**, max **96.70 ms**, failures **0/100**
-- Via-Ziti: avg **27.15 ms**, p50 **27.53 ms**, p90 **35.47 ms**, p99 **62.87 ms**, max **105.48 ms**, failures **1/100**
+- Baseline: avg **0.618 ms**, p50 **0.627 ms**, p90 **0.734 ms**, p99 **0.858 ms**, min **0.333 ms**, max **0.862 ms**, failures **0/100**
+- Via-Ziti: avg **1.735 ms**, p50 **1.374 ms**, p90 **1.68 ms**, p99 **5.82 ms**, min **0.915 ms**, max **35.975 ms**, failures **0/100**
 
 **UDP iperf3 @ 50M for 10s (UE → DN)**
-- Baseline: **~50.00 Mbps**, jitter **0.242 ms**, loss **1.04%** (483/46367)
-- Via-Ziti: **~49.98 Mbps**, jitter **0.218 ms**, loss **6.96%** (3227/46366)
+- Baseline: **~50.00 Mbps**, jitter **0.01 ms**, loss **0%** (0/46361)
+- Via-Ziti: **~50.00 Mbps**, jitter **0.012 ms**, loss **0%** (0/46361)
 
 ## 8. Cleanup
 
