@@ -1,6 +1,6 @@
 # openziti-5gc
 
-Zero-trust overlay for a 5G core network — protects the N2 / N3 / N4 interfaces of [free5gc](https://free5gc.org/) with [OpenZiti](https://openziti.io/) mTLS tunnels, while keeping gNB and core completely isolated at the network level.
+Zero-trust overlay for a 5G core network — protects the N2 / N3 interfaces of [free5gc](https://free5gc.org/) with [OpenZiti](https://openziti.io/) mTLS tunnels, while keeping gNB and core completely isolated at the network level.
 ---
 
 ## Architecture
@@ -21,7 +21,6 @@ Zero-trust overlay for a 5G core network — protects the N2 / N3 / N4 interface
 | N2 (NGAP) | SCTP:38412 | `n2-ngap-service` | UDP (n2-sctp-gateway preserves SCTP metadata) |
 | N3 UL (GTP-U) | UDP:2152 | `n3-gtpu-service` | UDP |
 | N3 DL (GTP-U) | UDP:2152 | `n3-gtpu-dl-service` | UDP |
-| N4 (PFCP) | UDP:8805 | `n4-pfcp-service` | UDP |
 
 ---
 
@@ -106,7 +105,7 @@ openziti-5gc/
 ├── router/
 │   └── router-config.yaml       # Edge Router configuration
 ├── policies/
-│   ├── services.yml             # N2 / N3 / N4 service definitions
+│   ├── services.yml             # N2 / N3 service definitions
 │   ├── identities.yml           # gNB & core identity definitions
 │   ├── service-policies.yml     # Dial / Bind access policies
 │   └── edge-router-policies.yml # Router access policies

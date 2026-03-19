@@ -1,6 +1,6 @@
 # openziti-5gc — Technical Documentation
 
-This document provides a comprehensive technical reference for the openziti-5gc project: a zero-trust overlay that protects the N2, N3, and N4 interfaces of a free5gc 5G core network using OpenZiti mTLS tunnels.
+This document provides a comprehensive technical reference for the openziti-5gc project: a zero-trust overlay that protects the N2 and N3 interfaces of a free5gc 5G core network using OpenZiti mTLS tunnels.
 
 ---
 
@@ -58,7 +58,6 @@ OpenZiti:
 |-----------|---------|----------|------|
 | **N2 (NGAP)** | Control plane: gNB ↔ AMF | SCTP | 38412 |
 | **N3 (GTP-U)** | User plane: gNB ↔ UPF | UDP | 2152 |
-| **N4 (PFCP)** | Control plane: SMF ↔ UPF | UDP | 8805 |
 | **SBI** | Inter-NF communication | HTTP/2 (TCP) | Various |
 
 In a conventional deployment these interfaces suffer from:
@@ -322,7 +321,6 @@ Defined in `policies/services.yml`:
 | `n2-ngap-service` | N2 NGAP | `amf.ziti:38412` UDP | UDP (SCTP metadata preserved by n2-gateway) | `127.0.0.1:38413` UDP |
 | `n3-gtpu-service` | N3 GTP-U uplink | `10.10.2.2:2152` UDP | UDP | `10.10.2.2:2152` UDP |
 | `n3-gtpu-dl-service` | N3 GTP-U downlink | `10.10.1.2:2152` UDP | UDP | `10.10.1.2:2152` UDP |
-| `n4-pfcp-service` | N4 PFCP | `10.10.2.2:8805` UDP | UDP | `127.0.0.8:8805` UDP |
 
 The `roleAttributes` on each service (e.g., `control-plane`, `user-plane`) allow policies to reference groups of services without listing them by name.
 
@@ -334,7 +332,7 @@ Defined in `policies/identities.yml`:
 |----------|----------------|---------|
 | `gnb-01` | `gnb-side`, `region-north` | UERANSIM gNB in gnb-ns |
 | `core-amf-host` | `core-side`, `control-plane-host` | Hosts N2 service (AMF) |
-| `core-upf-host` | `core-side`, `user-plane-host` | Hosts N3/N4 services (UPF) |
+| `core-upf-host` | `core-side`, `user-plane-host` | Hosts N3 services (UPF) |
 | `core-upf-dialer` | `core-side`, `user-plane-dialer` | Dials N3 downlink service (UPF → gNB) |
 
 Role attributes are the mechanism Service Policies use to select groups of identities without enumerating names.
@@ -347,7 +345,6 @@ Defined in `policies/service-policies.yml`:
 |--------|------|---------------|-------------|--------|
 | `gnb-dial-n2-n3` | Dial | `#gnb-side` | `#control-plane`, `#user-plane` | All gNBs can initiate N2 and N3 UL |
 | `core-bind-n2` | Bind | `#control-plane-host` | `#control-plane` | AMF host provides N2 endpoint |
-| `core-bind-n3-n4` | Bind | `#user-plane-host` | `#user-plane`, `#pfcp-plane` | UPF host provides N3 UL and N4 |
 | `gnb-bind-n3-downlink` | Bind | `#gnb-side` | `#user-plane-downlink` | gNB provides N3 DL receive endpoint |
 | `core-dial-n3-downlink` | Dial | `#user-plane-dialer` | `#user-plane-downlink` | core-upf-dialer sends N3 DL into Ziti |
 
