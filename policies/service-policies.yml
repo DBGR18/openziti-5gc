@@ -40,14 +40,13 @@ servicePolicies:
     serviceRoles:
       - "#control-plane"
 
-  # UPF host provides N3 and N4 services
-  - name: core-bind-n3-n4
+  # UPF host provides N3 services
+  - name: core-bind-n3
     type: Bind
     identityRoles:
       - "#user-plane-host"
     serviceRoles:
       - "#user-plane"
-      - "#pfcp-plane"
 
   # gNB side tunneler provides the downlink N3 host endpoint (10.10.1.2:2152)
   - name: gnb-bind-n3-downlink
@@ -69,10 +68,4 @@ servicePolicies:
   #   serviceRoles:
   #     - "#core-north"
 
-  # SMF can access N4 PFCP
-  # - name: smf-dial-n4
-  #   type: Dial
-  #   identityRoles:
-  #     - "#smf-host"
-  #   serviceRoles:
-  #     - "#pfcp-plane"
+  # N4 PFCP policy examples removed because current topology keeps PFCP local in core-ns.

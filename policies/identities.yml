@@ -54,7 +54,7 @@ identities:
     type: Device
     roleAttributes:
       - core-side
-      - user-plane-host     # Can provide N3/N4 service
+      - user-plane-host     # Can provide N3 service
     enrollment:
       ott: true
 

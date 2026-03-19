@@ -11,7 +11,7 @@ identity:
   key:         pki/ca/keys/router-client.key
   ca:          pki/ca/certs/ca.cert
   server_cert: pki/ca/certs/router-server.cert
-  server_key:  pki/ca/keys/router-client.key
+  server_key:  pki/ca/keys/router-server.key
 
 ctrl:
   # Controller is in the same router-ns, localhost is sufficient

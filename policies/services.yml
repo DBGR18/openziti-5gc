@@ -1,6 +1,6 @@
 # =============================================================================
 # Ziti Services Definitions
-# Corresponding to free5gc N2 / N3 / N4 interfaces
+# Corresponding to free5gc N2 / N3 interfaces in current 3-namespace deployment
 #
 # After modifying this file, run: make apply-services
 # =============================================================================
@@ -38,7 +38,7 @@ services:
   # N3 User Plane: gNB <-> UPF (GTP-U, UDP Port 2152)
   # UPF is in core-ns (10.10.2.2), gtpu.addr is set to 10.10.2.2 in upfcfg.yaml
   # SMF informs gNB: UPF is at 10.10.2.2:2152
-  # gnb-ns tproxy intercepts this packet -> Ziti -> core-ns Tunneler -> UPF
+  # gnb-ns route-based interception steers this packet into ziti0 -> Ziti -> core-ns Tunneler -> UPF
   # -------------------------------------------------------------------
   - name: n3-gtpu-service
     roleAttributes:
@@ -81,32 +81,9 @@ services:
         address: 10.10.1.2      # The actual listening address of the gNB process
         port: 2152
 
-  # -------------------------------------------------------------------
-  # N4 Control Plane (optional): SMF <-> UPF (PFCP, UDP Port 8805)
-  # Corresponding to smfcfg.yaml pfcp.nodeID: 127.0.0.1 -> UPF pfcp.addr: 127.0.0.8
-  # -------------------------------------------------------------------
-  # -------------------------------------------------------------------
-  # N4 Control Plane (optional): SMF <-> UPF (PFCP, UDP Port 8805)
-  # In the 3-ns model, SMF and UPF are both in core-ns, so N4 does not cross namespaces
-  # This service is only needed when SMF/UPF are deployed separately
-  # -------------------------------------------------------------------
-  - name: n4-pfcp-service
-    roleAttributes:
-      - core-services
-      - pfcp-plane
-    configs:
-      intercept:
-        protocols:
-          - udp
-        addresses:
-          - "10.10.2.2"        # Same as N3, UPF in core-ns
-        portRanges:
-          - low: 8805
-            high: 8805
-      host:
-        protocol: udp
-        address: 127.0.0.8     # UPF PFCP listening address in core-ns
-        port: 8805
+  # NOTE:
+  # N4 PFCP is intentionally not modeled as a Ziti service in this topology.
+  # SMF and UPF both run inside core-ns, so PFCP remains local loopback traffic.
 
   # -------------------------------------------------------------------
   # SBI Service Bus (optional): HTTP/2 SBI communication between NFs
