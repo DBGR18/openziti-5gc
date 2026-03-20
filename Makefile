@@ -33,6 +33,7 @@ ADMIN_PASS    := $(shell cat .admin-password 2>/dev/null || echo "Change!Me123")
 ZITI          := $(BIN_DIR)/ziti
 ZET           := $(BIN_DIR)/ziti-edge-tunnel
 N2GW          := $(BIN_DIR)/n2-sctp-gateway
+GO            := $(or $(shell command -v go 2>/dev/null),/usr/local/go/bin/go)
 
 .PHONY: all help dirs download build-from-source install-tunnel \
 	build-n2-gateway \
@@ -40,6 +41,8 @@ N2GW          := $(BIN_DIR)/n2-sctp-gateway
         start-controller start-router stop-controller stop-router \
         login apply apply-services apply-identities apply-policies \
         enroll-gnb enroll-core start-tunnel-gnb start-tunnel-core \
+	verify-router-tls fix-router-server-cert \
+	repair-pki \
         status clean systemd-install \
         ns-create ns-delete ns-status \
         start-core stop-core start-gnb stop-gnb \
@@ -110,8 +113,12 @@ build-from-source: dirs
 		git clone --depth 1 --branch "v$(ZITI_VERSION)" \
 			https://github.com/openziti/ziti.git /tmp/ziti-src; \
 	fi
-	@echo ">>> Building ziti (requires Go $(shell go version | awk '{print $$3}')）..."
-	cd /tmp/ziti-src && go build -o $(BIN_DIR)/ziti ./ziti/
+	@if [ ! -x "$(GO)" ]; then \
+		echo "✗ Go compiler not found. Install Go or export GO=/path/to/go"; \
+		exit 127; \
+	fi
+	@echo ">>> Building ziti (requires $$($(GO) version | awk '{print $$3}'))..."
+	cd /tmp/ziti-src && $(GO) build -o $(BIN_DIR)/ziti ./ziti/
 	chmod +x $(BIN_DIR)/ziti
 	$(ZITI) version
 	@echo "✓ Build from source complete"
@@ -132,52 +139,95 @@ install-tunnel: dirs
 
 build-n2-gateway: dirs
 	@echo ">>> Building N2 SCTP-aware gateway..."
-	cd $(PROJECT_DIR)/n2-gateway && go build -o $(N2GW) ./cmd/n2-sctp-gateway
+	@if [ ! -x "$(GO)" ]; then \
+		echo "✗ Go compiler not found. Install Go or export GO=/path/to/go"; \
+		exit 127; \
+	fi
+	cd $(PROJECT_DIR)/n2-gateway && $(GO) build -o $(N2GW) ./cmd/n2-sctp-gateway
 	chmod +x $(N2GW)
 	@echo "✓ N2 gateway build complete"
 
 pki:
-	@echo ">>> Generating Root CA..."
-	@echo ">>> Pre-creating directory structure for all certificates..."
-	mkdir -p $(PKI_DIR)/{ctrl-intermediate,ctrl-server,ctrl-client,router-server,router-client}/{keys,certs}
-	@echo ">>> Generating Root CA..."
-	$(ZITI) pki create ca \
-		--pki-root $(PKI_DIR) \
-		--ca-file ca \
-		--ca-name "5GC-Ziti-Root-CA"
-	@echo ">>> Generating Controller Intermediate CA..."
-	$(ZITI) pki create intermediate \
-		--pki-root $(PKI_DIR) \
-		--ca-name ca \
-		--intermediate-file ctrl-intermediate \
-		--intermediate-name "Controller Signing CA"
-	@echo ">>> Generating Controller Server Certificate..."
-	$(ZITI) pki create server \
-		--pki-root $(PKI_DIR) \
-		--ca-name ca \
-		--server-file ctrl-server \
-		--dns "localhost,ziti-controller" \
-		--ip "127.0.0.1,10.10.1.1,10.10.2.1,10.10.3.1"
-	@echo ">>> Generating Controller Client Certificate..."
-	$(ZITI) pki create client \
-		--pki-root $(PKI_DIR) \
-		--ca-name ca \
-		--client-file ctrl-client \
-		--client-name "Controller Client"
-	@echo ">>> Generating Router Server Certificate..."
-	$(ZITI) pki create server \
-		--pki-root $(PKI_DIR) \
-		--ca-name ca \
-		--server-file router-server \
-		--dns "localhost,ziti-router" \
-		--ip "127.0.0.1,10.10.1.1,10.10.2.1,10.10.3.1"
-	@echo ">>> Generating Router Client Certificate..."
-	$(ZITI) pki create client \
-		--pki-root $(PKI_DIR) \
-		--ca-name ca \
-		--client-file router-client \
-		--client-name "Router Client"
-	@echo "✓ PKI certificates generation complete (located in $(PKI_DIR)）"
+	@echo ">>> Generating PKI with safe script..."
+	-@sudo rm -rf $(PKI_DIR) 2>/dev/null || true
+	@mkdir -p $(PKI_DIR)
+	-@sudo chown -R $$(id -u):$$(id -g) $(PKI_DIR) 2>/dev/null || true
+	bash $(SCRIPTS_DIR)/pki-generate-safe.sh
+	-@sudo chown -R $$(id -u):$$(id -g) $(PKI_DIR) 2>/dev/null || true
+	@echo "✓ PKI certificates generation complete (located in $(PKI_DIR))"
+	@echo ">>> Verifying PKI integrity..."
+	@test -s $(PKI_DIR)/ca/certs/ca.cert || (echo "✗ CA cert missing or empty" && exit 1)
+	@test -s $(PKI_DIR)/ca/keys/ca.key || (echo "✗ CA key missing or empty" && exit 1)
+	@test -s $(PKI_DIR)/ca/certs/router-server.cert || (echo "✗ router-server cert missing or empty" && exit 1)
+	@test -s $(PKI_DIR)/ca/keys/router-server.key || (echo "✗ router-server key missing or empty" && exit 1)
+	@openssl x509 -in $(PKI_DIR)/ca/certs/router-server.cert -noout >/dev/null 2>&1 || (echo "✗ router-server.cert is not a valid certificate" && exit 1)
+	@openssl pkey -in $(PKI_DIR)/ca/keys/router-server.key -noout >/dev/null 2>&1 || (echo "✗ router-server.key is not a valid key" && exit 1)
+	@echo "✓ PKI integrity verified"
+
+verify-router-tls:
+	@echo ">>> Verifying router server cert/key pair..."
+	@openssl x509 -in $(PKI_DIR)/ca/certs/router-server.cert -pubkey -noout >| $(DATA_DIR)/router-server.cert.pub 2>/dev/null; \
+	openssl pkey -in $(PKI_DIR)/ca/keys/router-server.key -pubout >| $(DATA_DIR)/router-server.key.pub 2>/dev/null; \
+	if diff -q $(DATA_DIR)/router-server.cert.pub $(DATA_DIR)/router-server.key.pub >/dev/null 2>&1; then \
+		echo "  ✓ router-server cert/key pair valid"; \
+	else \
+		echo "  ✗ router-server cert/key mismatch"; \
+		exit 1; \
+	fi
+
+repair-pki:
+	@echo ">>> Repairing PKI using safe generation script..."
+	-@sudo rm -rf $(PKI_DIR) 2>/dev/null || true
+	@mkdir -p $(PKI_DIR)
+	-@sudo chown -R $$(id -u):$$(id -g) $(PKI_DIR) 2>/dev/null || true
+	bash $(SCRIPTS_DIR)/pki-generate-safe.sh
+	-@sudo chown -R $$(id -u):$$(id -g) $(PKI_DIR) 2>/dev/null || true
+	@$(MAKE) verify-router-tls
+	@echo "✓ PKI repair complete"
+
+fix-router-server-cert:
+	@echo ">>> Checking router server cert/key pair (auto-heal if needed)..."
+	@openssl x509 -in $(PKI_DIR)/ca/certs/router-server.cert -pubkey -noout >| $(DATA_DIR)/router-server.cert.pub 2>/dev/null; \
+	openssl pkey -in $(PKI_DIR)/ca/keys/router-server.key -pubout >| $(DATA_DIR)/router-server.key.pub 2>/dev/null; \
+	if diff -q $(DATA_DIR)/router-server.cert.pub $(DATA_DIR)/router-server.key.pub >/dev/null 2>&1; then \
+		echo "  ✓ router-server cert/key pair valid"; \
+	else \
+		echo "  ✗ router-server cert/key mismatch detected, trying in-place regeneration..."; \
+		openssl x509 -in $(PKI_DIR)/ca/certs/ca.cert -pubkey -noout >| $(DATA_DIR)/ca.cert.pub 2>/dev/null; \
+		openssl pkey -in $(PKI_DIR)/ca/keys/ca.key -pubout >| $(DATA_DIR)/ca.key.pub 2>/dev/null; \
+		if ! diff -q $(DATA_DIR)/ca.cert.pub $(DATA_DIR)/ca.key.pub >/dev/null 2>&1; then \
+			echo "  ✗ Root CA cert/key mismatch. Running full PKI repair..."; \
+			$(MAKE) repair-pki; \
+			openssl x509 -in $(PKI_DIR)/ca/certs/router-server.cert -pubkey -noout >| $(DATA_DIR)/router-server.cert.pub 2>/dev/null; \
+			openssl pkey -in $(PKI_DIR)/ca/keys/router-server.key -pubout >| $(DATA_DIR)/router-server.key.pub 2>/dev/null; \
+			if diff -q $(DATA_DIR)/router-server.cert.pub $(DATA_DIR)/router-server.key.pub >/dev/null 2>&1; then \
+				echo "  ✓ Recovered by full PKI repair"; \
+				exit 0; \
+			else \
+				echo "  ✗ FATAL: PKI repaired but router-server pair still mismatched"; \
+				exit 1; \
+			fi; \
+		fi; \
+		$(ZITI) pki create server \
+			--pki-root $(PKI_DIR) \
+			--ca-name ca \
+			--server-file router-server-regenerate \
+			--dns "localhost,ziti-router" \
+			--ip "127.0.0.1,10.10.1.1,10.10.2.1,10.10.3.1"; \
+		if [ ! -f $(PKI_DIR)/ca/certs/router-server-regenerate.cert ] || [ ! -f $(PKI_DIR)/ca/keys/router-server-regenerate.key ]; then \
+			echo "  ✗ FATAL: Regenerated router-server files not found"; \
+			exit 1; \
+		fi; \
+		openssl x509 -in $(PKI_DIR)/ca/certs/router-server-regenerate.cert -pubkey -noout >| $(DATA_DIR)/router-server-regen.cert.pub; \
+		openssl pkey -in $(PKI_DIR)/ca/keys/router-server-regenerate.key -pubout >| $(DATA_DIR)/router-server-regen.key.pub; \
+		if ! diff -q $(DATA_DIR)/router-server-regen.cert.pub $(DATA_DIR)/router-server-regen.key.pub >/dev/null 2>&1; then \
+			echo "  ✗ FATAL: Regenerated router-server cert/key still mismatch"; \
+			exit 1; \
+		fi; \
+		cp -f $(PKI_DIR)/ca/certs/router-server-regenerate.cert $(PKI_DIR)/ca/certs/router-server.cert; \
+		cp -f $(PKI_DIR)/ca/keys/router-server-regenerate.key $(PKI_DIR)/ca/keys/router-server.key; \
+		echo "  ✓ Regenerated and replaced router-server cert/key pair"; \
+	fi
 
 controller-init:
 	@echo ">>> Initializing Controller database..."
@@ -217,7 +267,7 @@ router-init: login
 		--jwt $(DATA_DIR)/main-router.jwt
 	@echo "✓ Router registration complete"
 
-start-router:
+start-router: fix-router-server-cert
 	@echo ">>> Starting Router in router-ns..."
 	sudo ip netns exec router-ns \
 		nohup $(ZITI) router run $(ROUTER_CFG) \
@@ -265,14 +315,11 @@ enroll-gnb:
 	@for jwt in $(PKI_DIR)/identities/gnb-*.jwt; do \
 		name=$$(basename $$jwt .jwt); \
 		json="$(PKI_DIR)/identities/$$name.json"; \
-		if [ ! -f $$json ] || [ $$jwt -nt $$json ]; then \
-			echo ">>> Enrolling $$name ..."; \
-			rm -f $$json; \
-			$(ZET) enroll --jwt $$jwt \
-				--identity $$json; \
-		else \
-			echo "[skip] $$name already enrolled"; \
-		fi \
+		echo ">>> Re-enrolling $$name ..."; \
+		rm -f $$json; \
+		$(ZET) enroll --jwt $$jwt \
+			--identity $$json; \
+		chmod 600 $$json; \
 	done
 	@echo "✓ gNB Identity enrollment complete"
 
@@ -280,14 +327,11 @@ enroll-core:
 	@for jwt in $(PKI_DIR)/identities/core-*.jwt; do \
 		name=$$(basename $$jwt .jwt); \
 		json="$(PKI_DIR)/identities/$$name.json"; \
-		if [ ! -f $$json ] || [ $$jwt -nt $$json ]; then \
-			echo ">>> Enrolling $$name ..."; \
-			rm -f $$json; \
-			$(ZET) enroll --jwt $$jwt \
-				--identity $$json; \
-		else \
-			echo "[skip] $$name already enrolled"; \
-		fi \
+		echo ">>> Re-enrolling $$name ..."; \
+		rm -f $$json; \
+		$(ZET) enroll --jwt $$jwt \
+			--identity $$json; \
+		chmod 600 $$json; \
 	done
 	@echo "✓ Core Identity enrollment complete"
 
@@ -295,11 +339,19 @@ enroll: enroll-gnb enroll-core
 	@echo "✓ All Identities enrollment complete"
 
 start-tunnel-core: build-n2-gateway
+	@echo ">>> Verifying controller and router are running..."
+	@sudo ip netns exec router-ns pgrep -f "ziti controller run" >/dev/null || (echo "✗ Controller not running" && exit 1)
+	@sudo ip netns exec router-ns pgrep -f "ziti router run" >/dev/null || (echo "✗ Router not running" && exit 1)
+	@echo "✓ Controller and Router verified"
 	@echo ">>> Starting Tunneler in core-ns (run-host mode)..."
 	@echo ">>> Preparing core-side host identities ..."
 	@mkdir -p $(DATA_DIR)/core-host-identities
+	@rm -f $(DATA_DIR)/core-host-identities/config.json
+	@rm -f $(DATA_DIR)/core-host-identities/*.json
 	@cp -f $(PKI_DIR)/identities/core-amf-host.json $(DATA_DIR)/core-host-identities/ 2>/dev/null || true
 	@cp -f $(PKI_DIR)/identities/core-upf-host.json $(DATA_DIR)/core-host-identities/ 2>/dev/null || true
+	@test -s $(DATA_DIR)/core-host-identities/core-amf-host.json || (echo "✗ missing core-amf-host identity JSON" && exit 1)
+	@test -s $(DATA_DIR)/core-host-identities/core-upf-host.json || (echo "✗ missing core-upf-host identity JSON" && exit 1)
 	@echo ">>> Cleaning up old tunnel/N2 gateway in core-ns ..."
 	-@if [ -f $(DATA_DIR)/tunnel-core.pid ]; then \
 		sudo kill $$(cat $(DATA_DIR)/tunnel-core.pid) 2>/dev/null || true; \
@@ -317,7 +369,9 @@ start-tunnel-core: build-n2-gateway
 	-sudo ip netns exec core-ns ip link del ziti0 2>/dev/null || true
 	-sudo ip netns exec core-ns ip link del ziti1 2>/dev/null || true
 	@echo ">>> Pinning core->router transport path via veth-core..."
-	-sudo ip netns exec core-ns ip route replace 10.10.3.1/32 via 10.10.2.1 dev veth-core 2>/dev/null || true
+	sudo ip netns exec core-ns ip route replace 10.10.3.1/32 via 10.10.2.1 dev veth-core
+	@sudo ip netns exec core-ns sh -c 'ip route get 10.10.3.1 | grep -q "dev veth-core"' \
+		|| (echo "✗ core-ns route pin failed for 10.10.3.1" && exit 1)
 	@sleep 1
 	sudo ip netns exec core-ns \
 		nohup $(ZET) run-host \
@@ -336,6 +390,10 @@ start-tunnel-core: build-n2-gateway
 		> $(LOG_DIR)/tunnel-core-dial.log 2>&1 &
 	@sudo ip netns exec core-ns pgrep -f "ziti-edge-tunnel run --identity $(PKI_DIR)/identities/core-upf-dialer.json" | tail -n1 > $(DATA_DIR)/tunnel-core-dial.pid || true
 	@sleep 2
+	@echo ">>> Re-applying core->router pin route after tunnel interfaces creation..."
+	sudo ip netns exec core-ns ip route replace 10.10.3.1/32 via 10.10.2.1 dev veth-core
+	@sudo ip netns exec core-ns sh -c 'ip route get 10.10.3.1 | grep -q "dev veth-core"' \
+		|| (echo "✗ core-ns route pin lost after tunnel start" && exit 1)
 	@echo "✓ core-upf-dialer started (N3 downlink intercept)"
 	@echo ">>> Starting N2 SCTP-aware gateway (in core-ns)..."
 	sudo ip netns exec core-ns \
@@ -346,6 +404,10 @@ start-tunnel-core: build-n2-gateway
 
 start-tunnel-gnb: build-n2-gateway
 	@echo ">>> Starting Tunneler in gnb-ns (run/TUN mode)..."
+	@echo ">>> Pinning gnb->router transport path via veth-gnb..."
+	sudo ip netns exec gnb-ns ip route replace 10.10.3.1/32 via 10.10.1.1 dev veth-gnb
+	@sudo ip netns exec gnb-ns sh -c 'ip route get 10.10.3.1 | grep -q "dev veth-gnb"' \
+		|| (echo "✗ gnb-ns route pin failed for 10.10.3.1" && exit 1)
 	@echo ">>> Setting gnb-ns DNS to Ziti DNS (100.64.0.1)..."
 	-sudo mkdir -p /etc/netns/gnb-ns
 	-echo -e "nameserver 100.64.0.1\noptions timeout:1 attempts:1" | sudo tee /etc/netns/gnb-ns/resolv.conf >/dev/null
@@ -370,7 +432,14 @@ start-tunnel-gnb: build-n2-gateway
 		> $(LOG_DIR)/tunnel-gnb.log 2>&1 &
 	@sudo ip netns exec gnb-ns pgrep -f "ziti-edge-tunnel run --identity" | tail -n1 > $(DATA_DIR)/tunnel-gnb.pid || true
 	@sleep 3
+	@echo ">>> Re-applying gnb->router pin route after tunnel interfaces creation..."
+	sudo ip netns exec gnb-ns ip route replace 10.10.3.1/32 via 10.10.1.1 dev veth-gnb
+	@sudo ip netns exec gnb-ns sh -c 'ip route get 10.10.3.1 | grep -q "dev veth-gnb"' \
+		|| (echo "✗ gnb-ns route pin lost after tunnel start" && exit 1)
 	@echo "✓ gNB Tunneler started in gnb-ns"
+	@echo ">>> Waiting for Ziti DNS record amf.ziti in gnb-ns..."
+	@timeout 30 bash -c 'until sudo ip netns exec gnb-ns getent hosts amf.ziti >/dev/null 2>&1; do sleep 1; done' \
+		|| (echo "✗ amf.ziti DNS is not ready; check $(LOG_DIR)/tunnel-gnb.log" && exit 1)
 	@echo ">>> Adding UPF route (required for route-based tunnel interception)..."
 	sudo ip netns exec gnb-ns \
 		ip route add 10.10.2.0/24 via 10.10.1.1 2>/dev/null || true
@@ -507,6 +576,7 @@ resume: start-controller start-router start-core start-tunnel-core start-tunnel-
 
 clean: stop-all
 	@echo ">>> Cleaning up data..."
+	-sudo rm -rf $(PKI_DIR) $(DATA_DIR) $(LOG_DIR) 2>/dev/null || true
 	rm -rf $(PKI_DIR) $(DATA_DIR) $(LOG_DIR)
 	rm -f .admin-password
 	-sudo bash $(SCRIPTS_DIR)/setup-namespaces.sh delete 2>/dev/null || true
